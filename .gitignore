@@ -1,0 +1,42 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build cache
+*.test
+*.out
+
+# Generated proto files
+gen/hivepb/*.go
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Snapshots and temp files
+/data/
+/tmp/
+*.db.bak
+
+# Config overrides (keep examples, ignore local)
+configs/local/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+volumes/
+
+.cursor

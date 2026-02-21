@@ -1,0 +1,12 @@
+id: "master-1"
+grpc_addr: ":9001"
+http_addr: ":8081"
+db_path: "./data/master-1.db"
+router_addr: "localhost:9000"
+heartbeat_interval: "5s"
+tx_timeout: "30s"
+snapshot_dir: "/tmp/hive-snapshots"
+log_level: "info"
+tables:
+  - users
+  - profiles

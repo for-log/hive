@@ -1,0 +1,176 @@
+syntax = "proto3";
+
+package hive;
+
+option go_package = "hive/gen/hivepb";
+
+// =============================================================================
+// Shared value type (SQLite-compatible: NULL, INTEGER, REAL, TEXT, BLOB)
+// =============================================================================
+
+message Value {
+  oneof kind {
+    bool   null_value = 1;
+    int64  int_value  = 2;
+    double real_value = 3;
+    string text_value = 4;
+    bytes  blob_value = 5;
+  }
+}
+
+// =============================================================================
+// HiveSQL -- client-facing API on the router
+// =============================================================================
+
+service HiveSQL {
+  rpc Execute(ExecuteRequest)    returns (ExecuteResponse);
+  rpc Query(QueryRequest)        returns (stream QueryResult);
+  rpc BeginTx(BeginTxRequest)    returns (BeginTxResponse);
+  rpc CommitTx(TxRequest)        returns (TxResponse);
+  rpc RollbackTx(TxRequest)      returns (TxResponse);
+}
+
+// =============================================================================
+// HiveMaster -- internal API implemented by each master
+// =============================================================================
+
+service HiveMaster {
+  rpc Execute(ExecuteRequest)    returns (ExecuteResponse);
+  rpc Query(QueryRequest)        returns (stream QueryResult);
+  rpc BeginTx(BeginTxRequest)    returns (BeginTxResponse);
+  rpc CommitTx(TxRequest)        returns (TxResponse);
+  rpc RollbackTx(TxRequest)      returns (TxResponse);
+  rpc ListTables(ListTablesRequest) returns (ListTablesResponse);
+  rpc Snapshot(SnapshotRequest)  returns (stream SnapshotChunk);
+}
+
+// =============================================================================
+// HiveRegistry -- master registration and health API on the router
+// =============================================================================
+
+service HiveRegistry {
+  rpc Register(RegisterRequest)      returns (RegisterResponse);
+  rpc Heartbeat(HeartbeatRequest)    returns (HeartbeatResponse);
+}
+
+// =============================================================================
+// SQL execution messages
+// =============================================================================
+
+message ExecuteRequest {
+  string          sql         = 1;
+  repeated Value  args        = 2;
+  // tx_id is empty when not inside a transaction.
+  string          tx_id       = 3;
+  // return_rows instructs the server to append RETURNING * and return rows.
+  // Used by the driver for write-through to local SQLite.
+  bool            return_rows = 4;
+}
+
+message ExecuteResponse {
+  int64               rows_affected  = 1;
+  int64               last_insert_id = 2;
+  // Populated when return_rows was true.
+  QueryMeta           returned_meta  = 3;
+  repeated QueryRow   returned_rows  = 4;
+}
+
+message QueryRequest {
+  string         sql   = 1;
+  repeated Value args  = 2;
+  // tx_id is empty when not inside a transaction.
+  string         tx_id = 3;
+}
+
+// QueryResult is the stream element for Query RPCs.
+// The first message always carries meta; subsequent messages carry rows.
+message QueryResult {
+  oneof payload {
+    QueryMeta meta = 1;
+    QueryRow  row  = 2;
+  }
+}
+
+message QueryMeta {
+  repeated ColumnInfo columns = 1;
+}
+
+message ColumnInfo {
+  string name = 1;
+  // SQLite affinity: "INTEGER", "REAL", "TEXT", "BLOB", or "" (untyped).
+  string type = 2;
+}
+
+message QueryRow {
+  repeated Value values = 1;
+}
+
+// =============================================================================
+// Transaction messages
+// =============================================================================
+
+message BeginTxRequest {
+  // read_only is reserved for future read-only transaction support.
+  bool read_only = 1;
+}
+
+message BeginTxResponse {
+  string tx_id = 1;
+}
+
+message TxRequest {
+  string tx_id = 1;
+}
+
+message TxResponse {
+  bool ok = 1;
+}
+
+// =============================================================================
+// Table discovery
+// =============================================================================
+
+message ListTablesRequest {}
+
+message ListTablesResponse {
+  repeated string tables = 1;
+}
+
+// =============================================================================
+// Snapshot streaming
+// =============================================================================
+
+message SnapshotRequest {}
+
+message SnapshotChunk {
+  bytes data = 1;
+  // total_size is set only in the first chunk to allow progress tracking.
+  int64 total_size = 2;
+}
+
+// =============================================================================
+// Master registration and health
+// =============================================================================
+
+message RegisterRequest {
+  string          master_id = 1;
+  string          grpc_addr = 2;
+  string          http_addr = 3;
+  repeated string tables    = 4;
+}
+
+message RegisterResponse {
+  bool            ok        = 1;
+  // conflicts lists table names already owned by a different master.
+  repeated string conflicts = 2;
+}
+
+message HeartbeatRequest {
+  string master_id = 1;
+  // draining signals that the master is performing a graceful shutdown.
+  bool   draining  = 2;
+}
+
+message HeartbeatResponse {
+  bool ok = 1;
+}

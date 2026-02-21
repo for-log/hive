@@ -1,0 +1,14 @@
+id: "master-2"
+grpc_addr: ":9002"
+http_addr: ":8082"
+advertise_grpc_addr: "master-2:9002"
+advertise_http_addr: "master-2:8082"
+db_path: "/data/master-2.db"
+router_addr: "router:9000"
+heartbeat_interval: "5s"
+tx_timeout: "30s"
+snapshot_dir: "/tmp/hive-snapshots"
+log_level: "info"
+tables:
+  - orders
+  - payments

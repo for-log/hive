@@ -1,0 +1,59 @@
+services:
+  router:
+    build:
+      context: ..
+      target: router
+    command: ["-config", "/etc/hive/router.yaml"]
+    ports:
+      - "9000:9000"   # gRPC (HiveSQL + HiveRegistry)
+      - "8080:8080"   # HTTP  (/db/merged, /masters)
+    volumes:
+      - ./configs/docker/router.yaml:/etc/hive/router.yaml:ro
+      - router-data:/data
+      - router-snapshots:/tmp/hive-router-snapshots
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/masters"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+  master-1:
+    build:
+      context: ..
+      target: master
+    command: ["-config", "/etc/hive/master-1.yaml"]
+    ports:
+      - "9001:9001"   # gRPC (HiveMaster)
+      - "8081:8081"   # HTTP  (/db snapshot)
+    volumes:
+      - ./configs/docker/master-1.yaml:/etc/hive/master-1.yaml:ro
+      - master1-data:/data
+      - master1-snapshots:/tmp/hive-snapshots
+    depends_on:
+      router:
+        condition: service_healthy
+
+  master-2:
+    build:
+      context: ..
+      target: master
+    command: ["-config", "/etc/hive/master-2.yaml"]
+    ports:
+      - "9002:9002"   # gRPC (HiveMaster)
+      - "8082:8082"   # HTTP  (/db snapshot)
+    volumes:
+      - ./configs/docker/master-2.yaml:/etc/hive/master-2.yaml:ro
+      - master2-data:/data
+      - master2-snapshots:/tmp/hive-snapshots
+    depends_on:
+      router:
+        condition: service_healthy
+
+volumes:
+  router-data:
+  router-snapshots:
+  master1-data:
+  master1-snapshots:
+  master2-data:
+  master2-snapshots:

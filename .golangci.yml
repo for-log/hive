@@ -1,0 +1,47 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck       # never ignore errors
+    - govet          # go vet checks
+    - staticcheck    # comprehensive static analysis
+    - ineffassign    # ineffectual assignments
+    - misspell       # spelling mistakes
+    - unconvert      # unnecessary type conversions
+    - unparam        # unused function parameters
+    - noctx          # http requests without context
+    - bodyclose      # http response body not closed
+    - nilerr         # returning nil with non-nil error
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    govet:
+      enable-all: true
+
+  exclusions:
+    rules:
+      # Generated protobuf code -- skip all linting
+      - path: "gen/"
+        linters:
+          - errcheck
+          - govet
+          - staticcheck
+          - ineffassign
+          - misspell
+          - unconvert
+          - unparam
+          - noctx
+          - bodyclose
+          - nilerr
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - hive
