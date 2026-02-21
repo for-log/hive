@@ -1,15 +1,3 @@
-// Package master implements the write-side SQLite engine for a hive-master node.
-//
-// Concurrency model:
-//   - writeDB is owned exclusively by the writerLoop goroutine; no other code
-//     may call writeDB methods directly.
-//   - readDB is a *sql.DB opened with query_only(1) PRAGMA; any goroutine may
-//     use it concurrently.
-//   - All write requests are sent through writeCh (buffered) and the caller
-//     blocks on the per-request result channel.
-//   - Transactions: at most one active *sql.Tx lives inside writerLoop.
-//     BeginTx/CommitTx/RollbackTx are also routed through writeCh so that
-//     the transaction object never escapes the writer goroutine.
 package master
 
 import (
@@ -153,13 +141,11 @@ func (db *DB) BeginTx(ctx context.Context) error {
 	return err
 }
 
-// CommitTx returns an error if no transaction is active.
 func (db *DB) CommitTx(ctx context.Context) error {
 	_, err := db.send(ctx, cmdCommitTx, "", nil)
 	return err
 }
 
-// RollbackTx returns an error if no transaction is active.
 func (db *DB) RollbackTx(ctx context.Context) error {
 	_, err := db.send(ctx, cmdRollbackTx, "", nil)
 	return err
@@ -243,11 +229,8 @@ func (db *DB) writerLoop(ctx context.Context) {
 	}
 }
 
-// handleBegin starts a new transaction; called only from writerLoop.
-// The transaction is opened with context.Background() so that it is not
-// cancelled when the initiating RPC request context expires. The caller
-// (router or server) is responsible for explicit Commit/Rollback and for
-// enforcing transaction timeouts at a higher level.
+// context.Background() keeps the tx alive past the initiating RPC lifetime;
+// the caller is responsible for explicit Commit/Rollback and timeout enforcement.
 func (db *DB) handleBegin(_ context.Context, activeTx **sql.Tx) writeResult {
 	if *activeTx != nil {
 		return writeResult{err: fmt.Errorf("master/writer: transaction already active")}

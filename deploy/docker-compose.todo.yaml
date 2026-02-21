@@ -1,14 +1,15 @@
 services:
   router:
     build:
-      context: .
+      context: ..
+      dockerfile: deploy/Dockerfile
       target: router
     command: ["-config", "/etc/hive/router.yaml"]
     ports:
-      - "9000:9000"   # gRPC (HiveSQL + HiveRegistry)
-      - "8080:8080"   # HTTP  (/db/merged, /masters)
+      - "9000:9000"
+      - "8080:8080"
     volumes:
-      - ./configs/docker/router.yaml:/etc/hive/router.yaml:ro
+      - ../configs/docker/router.yaml:/etc/hive/router.yaml:ro
       - router-data:/data
       - router-snapshots:/tmp/hive-router-snapshots
     healthcheck:
@@ -20,11 +21,12 @@ services:
 
   master-1:
     build:
-      context: .
+      context: ..
+      dockerfile: deploy/Dockerfile
       target: master
     command: ["-config", "/etc/hive/master-1.yaml"]
     volumes:
-      - ./configs/docker/master-1.yaml:/etc/hive/master-1.yaml:ro
+      - ../configs/docker/master-1.yaml:/etc/hive/master-1.yaml:ro
       - master1-data:/data
       - master1-snapshots:/tmp/hive-snapshots
     depends_on:
@@ -33,27 +35,53 @@ services:
 
   master-2:
     build:
-      context: .
+      context: ..
+      dockerfile: deploy/Dockerfile
       target: master
     command: ["-config", "/etc/hive/master-2.yaml"]
     volumes:
-      - ./configs/docker/master-2.yaml:/etc/hive/master-2.yaml:ro
+      - ../configs/docker/master-2.yaml:/etc/hive/master-2.yaml:ro
       - master2-data:/data
       - master2-snapshots:/tmp/hive-snapshots
     depends_on:
       router:
         condition: service_healthy
 
-  app:
+  todo-1:
     build:
-      context: .
-      target: example
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: todo
+    ports:
+      - "8090:8090"
     environment:
       - HIVE_GRPC_ADDR=router:9000
       - HIVE_HTTP_ADDR=router:8080
-    volumes:
-      - app-local:/tmp/hive-example
+      - LISTEN_ADDR=:8090
+      - LOCAL_DB=/tmp/hive-todo.db
     depends_on:
+      router:
+        condition: service_healthy
+      master-1:
+        condition: service_started
+      master-2:
+        condition: service_started
+
+  todo-2:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: todo
+    ports:
+      - "8091:8091"
+    environment:
+      - HIVE_GRPC_ADDR=router:9000
+      - HIVE_HTTP_ADDR=router:8080
+      - LISTEN_ADDR=:8091
+      - LOCAL_DB=/tmp/hive-todo.db
+    depends_on:
+      router:
+        condition: service_healthy
       master-1:
         condition: service_started
       master-2:
@@ -66,4 +94,3 @@ volumes:
   master1-snapshots:
   master2-data:
   master2-snapshots:
-  app-local:

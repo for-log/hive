@@ -53,7 +53,6 @@ func NewRegistry(tr TableResolver, mr MasterRegistry, cfg RegistryConfig, log *s
 	return &Registry{tr: tr, mr: mr, log: log, cfg: cfg}
 }
 
-// Register returns conflicts for tables already owned by a different master.
 func (r *Registry) Register(ctx context.Context, req *hivepb.RegisterRequest) (*hivepb.RegisterResponse, error) {
 	if req.MasterId == "" {
 		return nil, status.Error(codes.InvalidArgument, "master_id is required")

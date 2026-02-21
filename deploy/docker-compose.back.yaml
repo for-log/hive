@@ -1,7 +1,7 @@
 services:
   router:
     build:
-      context: ..
+      context: .
       target: router
     command: ["-config", "/etc/hive/router.yaml"]
     ports:
@@ -20,7 +20,7 @@ services:
 
   master-1:
     build:
-      context: ..
+      context: .
       target: master
     command: ["-config", "/etc/hive/master-1.yaml"]
     ports:
@@ -36,7 +36,7 @@ services:
 
   master-2:
     build:
-      context: ..
+      context: .
       target: master
     command: ["-config", "/etc/hive/master-2.yaml"]
     ports:

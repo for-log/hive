@@ -1,12 +1,3 @@
-// Binary hive-router routes SQL queries across hive-master shards.
-//
-// It maintains a persistent table→master mapping in a local SQLite meta-store,
-// exposes a gRPC HiveSQL endpoint for clients, a gRPC HiveRegistry endpoint
-// for master registration, and an HTTP endpoint for merged snapshots.
-//
-// Usage:
-//
-//	hive-router -config ./configs/router.yaml
 package main
 
 import (

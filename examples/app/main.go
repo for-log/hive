@@ -1,17 +1,3 @@
-// Example demonstrating two independent local nodes sharing data via the router.
-//
-// Node A: writes two rows, syncs, reads — sees its own writes immediately.
-// Node B: reads before sync (empty), syncs, reads — now sees A's writes.
-//
-// Prerequisites: router on localhost:9000 (HTTP :8080), masters registered.
-//
-// Run:
-//
-//	go run ./examples/app/main.go
-//
-// Docker:
-//
-//	docker compose -f docker-compose.example.yaml up --build
 package main
 
 import (

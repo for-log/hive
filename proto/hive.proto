@@ -4,10 +4,6 @@ package hive;
 
 option go_package = "hive/gen/hivepb";
 
-// =============================================================================
-// Shared value type (SQLite-compatible: NULL, INTEGER, REAL, TEXT, BLOB)
-// =============================================================================
-
 message Value {
   oneof kind {
     bool   null_value = 1;
@@ -18,10 +14,6 @@ message Value {
   }
 }
 
-// =============================================================================
-// HiveSQL -- client-facing API on the router
-// =============================================================================
-
 service HiveSQL {
   rpc Execute(ExecuteRequest)    returns (ExecuteResponse);
   rpc Query(QueryRequest)        returns (stream QueryResult);
@@ -29,10 +21,6 @@ service HiveSQL {
   rpc CommitTx(TxRequest)        returns (TxResponse);
   rpc RollbackTx(TxRequest)      returns (TxResponse);
 }
-
-// =============================================================================
-// HiveMaster -- internal API implemented by each master
-// =============================================================================
 
 service HiveMaster {
   rpc Execute(ExecuteRequest)    returns (ExecuteResponse);
@@ -44,18 +32,10 @@ service HiveMaster {
   rpc Snapshot(SnapshotRequest)  returns (stream SnapshotChunk);
 }
 
-// =============================================================================
-// HiveRegistry -- master registration and health API on the router
-// =============================================================================
-
 service HiveRegistry {
   rpc Register(RegisterRequest)      returns (RegisterResponse);
   rpc Heartbeat(HeartbeatRequest)    returns (HeartbeatResponse);
 }
-
-// =============================================================================
-// SQL execution messages
-// =============================================================================
 
 message ExecuteRequest {
   string          sql         = 1;
@@ -105,10 +85,6 @@ message QueryRow {
   repeated Value values = 1;
 }
 
-// =============================================================================
-// Transaction messages
-// =============================================================================
-
 message BeginTxRequest {
   // read_only is reserved for future read-only transaction support.
   bool read_only = 1;
@@ -126,19 +102,11 @@ message TxResponse {
   bool ok = 1;
 }
 
-// =============================================================================
-// Table discovery
-// =============================================================================
-
 message ListTablesRequest {}
 
 message ListTablesResponse {
   repeated string tables = 1;
 }
-
-// =============================================================================
-// Snapshot streaming
-// =============================================================================
 
 message SnapshotRequest {}
 
@@ -147,10 +115,6 @@ message SnapshotChunk {
   // total_size is set only in the first chunk to allow progress tracking.
   int64 total_size = 2;
 }
-
-// =============================================================================
-// Master registration and health
-// =============================================================================
 
 message RegisterRequest {
   string          master_id = 1;

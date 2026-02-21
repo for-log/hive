@@ -1,7 +1,3 @@
-// Package tests contains end-to-end tests that spin up a full hive stack
-// (router + two masters) in-process using bufconn and net/http/httptest,
-// then exercise the system through the standard database/sql interface via
-// hivedriver.NewConnector.
 package tests
 
 import (

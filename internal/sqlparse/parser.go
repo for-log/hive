@@ -1,9 +1,3 @@
-// Package sqlparse wraps vitess-sqlparser to extract routing metadata from SQL.
-//
-// The router and the driver both use this package to decide:
-//   - whether a statement is DDL or DML
-//   - which tables are referenced (for shard lookup)
-//   - whether a RETURNING clause is present (INSERT/UPDATE/DELETE … RETURNING)
 package sqlparse
 
 import (
@@ -35,18 +29,27 @@ type ParsedQuery struct {
 	Type         QueryType
 	DDLAction    DDLAction // meaningful only when Type == QueryDDL
 	HasReturning bool      // detected via regex; vitess-sqlparser does not model RETURNING
+	IfNotExists  bool
 }
 
-var returningRE = regexp.MustCompile(`(?i)\s+RETURNING\b.*$`)
+// vitess-sqlparser does not support these SQLite-specific constructs;
+// strip them before parsing since they carry no routing information.
+var (
+	returningRE     = regexp.MustCompile(`(?i)\s+RETURNING\b.*$`)
+	ifNotExistsRE   = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b\s*`)
+	autoIncrementRE = regexp.MustCompile(`(?i)\bAUTOINCREMENT\b`)
+)
 
 func Parse(sql string) (ParsedQuery, error) {
 	hasReturning := returningRE.MatchString(sql)
+	ifNotExists := ifNotExistsRE.MatchString(sql)
 
 	// Strip RETURNING clause before handing to vitess-sqlparser, which does
 	// not support it and would return a syntax error.
-	parseable := sql
+	parseable := autoIncrementRE.ReplaceAllString(sql, "")
+	parseable = ifNotExistsRE.ReplaceAllString(parseable, "")
 	if hasReturning {
-		parseable = returningRE.ReplaceAllString(sql, "")
+		parseable = returningRE.ReplaceAllString(parseable, "")
 	}
 
 	stmt, err := sqlparser.Parse(parseable)
@@ -56,6 +59,7 @@ func Parse(sql string) (ParsedQuery, error) {
 
 	pq := ParsedQuery{
 		HasReturning: hasReturning,
+		IfNotExists:  ifNotExists,
 	}
 
 	switch s := stmt.(type) {
@@ -110,7 +114,6 @@ func ddlAction(action string) DDLAction {
 	}
 }
 
-// ddlTables includes both old and new names for RENAME.
 func ddlTables(d *sqlparser.DDL) []string {
 	name := tableName(d.Table)
 	if d.Action == sqlparser.RenameStr {

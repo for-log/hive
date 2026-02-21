@@ -19,7 +19,6 @@ import (
 	_ "modernc.org/sqlite" // register "sqlite" driver
 )
 
-// Use sql.OpenDB(connector) — no sql.Register / init() required.
 type Connector struct {
 	remote     hivepb.HiveSQLClient
 	localDB    *sql.DB
@@ -36,8 +35,6 @@ func NewConnector(dsn string) (*Connector, error) {
 	return newConnector(dsn)
 }
 
-// NewConnectorWithDialer creates a Connector with additional gRPC dial options.
-// Intended for testing with in-process transports (e.g. bufconn).
 func NewConnectorWithDialer(dsn string, opts ...grpc.DialOption) (*Connector, error) {
 	return newConnector(dsn, opts...)
 }
@@ -115,12 +112,10 @@ func (c *Connector) Connect(_ context.Context) (driver.Conn, error) {
 
 func (c *Connector) Driver() driver.Driver { return nil }
 
-// Sync downloads the merged snapshot from the router and replaces localDB contents.
 func (c *Connector) Sync(ctx context.Context) error {
 	return c.syncer.Sync(ctx)
 }
 
-// Close stops the auto-sync ticker and closes the local database.
 func (c *Connector) Close() error {
 	if c.syncTicker != nil {
 		c.syncTicker.Stop()
@@ -138,7 +133,6 @@ func (c *Connector) autoSync() {
 	}
 }
 
-// httpHostFromGRPC replaces the port in a gRPC address with the default HTTP port 8080.
 func httpHostFromGRPC(grpcAddr string) string {
 	host, _, found := strings.Cut(grpcAddr, ":")
 	if !found {

@@ -1,5 +1,3 @@
-// Package config provides configuration structs and YAML loading for
-// hive-router and hive-master binaries.
 package config
 
 import (

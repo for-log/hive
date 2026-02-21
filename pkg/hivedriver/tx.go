@@ -7,7 +7,6 @@ import (
 	"hive/gen/hivepb"
 )
 
-// Tx buffers write-through ops and applies them to localDB on Commit.
 type Tx struct {
 	conn *Conn
 	txID string

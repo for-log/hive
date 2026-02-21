@@ -1,5 +1,3 @@
-// Package router implements the hive-router: SQL routing, master registry,
-// snapshot merging, and the client-facing gRPC API.
 package router
 
 import (

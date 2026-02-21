@@ -2,10 +2,10 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /src
 
-COPY ../go.mod go.sum ./
+COPY go.mod go.sum ./
 RUN go mod download
 
-COPY .. .
+COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/hive-router ./cmd/router
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/hive-master ./cmd/master
@@ -35,11 +35,23 @@ FROM golang:1.25-alpine AS example
 
 WORKDIR /src
 
-COPY ../go.mod go.sum ./
+COPY go.mod go.sum ./
 RUN go mod download
 
-COPY .. .
+COPY . .
 
 RUN mkdir -p /tmp/hive-example
 
 ENTRYPOINT ["go", "run", "./examples/app/main.go"]
+
+# ---- todo app image ----
+FROM golang:1.25-alpine AS todo
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ENTRYPOINT ["go", "run", "./examples/todo/main.go"]

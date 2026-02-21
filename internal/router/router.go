@@ -20,6 +20,10 @@ import (
 	"hive/internal/sqlparse"
 )
 
+// errNotReady is the gRPC status message returned when no masters are alive.
+// The hivedriver recognises this exact string and retries with backoff.
+const errNotReady = "database_not_ready: no alive masters"
+
 // MasterExecutor is the consumer-side interface for a single master node.
 type MasterExecutor interface {
 	Execute(ctx context.Context, req *hivepb.ExecuteRequest, opts ...grpc.CallOption) (*hivepb.ExecuteResponse, error)
@@ -71,8 +75,6 @@ func NewRouter(tr TableResolver, mr MasterRegistry, cfg RouterConfig, log *slog.
 	}
 }
 
-// Execute routes a write statement to the appropriate master.
-// DDL (CREATE TABLE) is intercepted: the router picks a master and records the mapping.
 func (r *Router) Execute(ctx context.Context, req *hivepb.ExecuteRequest) (*hivepb.ExecuteResponse, error) {
 	pq, err := sqlparse.Parse(req.Sql)
 	if err != nil {
@@ -197,7 +199,6 @@ func (r *Router) RollbackTx(ctx context.Context, req *hivepb.TxRequest) (*hivepb
 	return &hivepb.TxResponse{Ok: true}, nil
 }
 
-// rollbackTx is the shared implementation used by RollbackTx and the timeout goroutine.
 func (r *Router) rollbackTx(ctx context.Context, txID string) error {
 	r.txsMu.Lock()
 	tx, ok := r.txs[txID]
@@ -224,7 +225,6 @@ func (r *Router) rollbackTx(ctx context.Context, txID string) error {
 	return nil
 }
 
-// executeDDL intercepts CREATE TABLE (picks master, records mapping) and forwards DROP/ALTER to the owning master.
 func (r *Router) executeDDL(ctx context.Context, req *hivepb.ExecuteRequest, pq sqlparse.ParsedQuery) (*hivepb.ExecuteResponse, error) {
 	if len(pq.Tables) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "DDL references no tables")
@@ -240,7 +240,15 @@ func (r *Router) executeDDL(ctx context.Context, req *hivepb.ExecuteRequest, pq 
 			return nil, err
 		}
 		if err = r.tr.RegisterTable(ctx, tableName, masterID); err != nil {
-			return nil, status.Errorf(codes.AlreadyExists, "register table: %v", err)
+			if !pq.IfNotExists {
+				return nil, status.Errorf(codes.AlreadyExists, "register table: %v", err)
+			}
+			// Table already registered — forward to the owning master so the
+			// master can also apply IF NOT EXISTS semantics on its own SQLite.
+			masterID, err = r.resolveMaster(ctx, tableName)
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		masterID, err = r.resolveMaster(ctx, tableName)
@@ -361,7 +369,7 @@ func (r *Router) pickMasterForDDL(ctx context.Context) (string, error) {
 		return "", status.Errorf(codes.Internal, "list masters: %v", err)
 	}
 	if len(masters) == 0 {
-		return "", status.Error(codes.Unavailable, "no alive masters")
+		return "", status.Error(codes.Unavailable, errNotReady)
 	}
 
 	best := masters[0].ID
@@ -398,6 +406,9 @@ func (r *Router) masterConn(ctx context.Context, masterID string) (MasterExecuto
 	masters, err := r.mr.AliveMasters(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "list masters: %v", err)
+	}
+	if len(masters) == 0 {
+		return nil, status.Error(codes.Unavailable, errNotReady)
 	}
 
 	var grpcAddr string

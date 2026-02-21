@@ -1,11 +1,3 @@
-// Binary hive-master is a single-shard SQLite write node.
-//
-// It accepts SQL from the router over gRPC, writes to a local SQLite file,
-// and serves point-in-time snapshots over HTTP.
-//
-// Usage:
-//
-//	hive-master -config ./configs/master-1.yaml
 package main
 
 import (

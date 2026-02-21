@@ -63,11 +63,14 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 		return nil, err
 	}
 
-	resp, err := c.remote.Execute(ctx, &hivepb.ExecuteRequest{
+	req := &hivepb.ExecuteRequest{
 		Sql:        query,
 		Args:       protoArgs,
 		ReturnRows: true,
 		TxId:       c.activeTxID,
+	}
+	resp, err := executeWithBackoff(ctx, c.log, func() (*hivepb.ExecuteResponse, error) {
+		return c.remote.Execute(ctx, req)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("hivedriver: exec: %w", err)
@@ -107,11 +110,14 @@ func (c *Conn) execReturningQuery(ctx context.Context, query string, args []driv
 		return nil, err
 	}
 
-	resp, err := c.remote.Execute(ctx, &hivepb.ExecuteRequest{
+	req := &hivepb.ExecuteRequest{
 		Sql:        query,
 		Args:       protoArgs,
 		ReturnRows: true,
 		TxId:       c.activeTxID,
+	}
+	resp, err := executeWithBackoff(ctx, c.log, func() (*hivepb.ExecuteResponse, error) {
+		return c.remote.Execute(ctx, req)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("hivedriver: exec returning: %w", err)
@@ -179,8 +185,6 @@ func collectLocalRows(rows *sql.Rows) (_ driver.Rows, err error) {
 	return newLocalRows(cols, result), nil
 }
 
-// buildWriteThroughOp constructs a writeThroughOp when local mirroring is needed.
-// DDL is always mirrored (no rows required). DML is mirrored only when rows were returned.
 func buildWriteThroughOp(pq sqlparse.ParsedQuery, rawSQL string, resp *hivepb.ExecuteResponse) (writeThroughOp, bool) {
 	tableName := ""
 	if len(pq.Tables) > 0 {
