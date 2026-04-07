@@ -1,0 +1,28 @@
+listen_addr: ":8080"
+
+masters:
+  - url: "http://localhost:8081"
+    token: "master1-token"
+  - url: "http://localhost:8082"
+    token: "master2-token"
+
+# Static table-to-master assignment (master index, 0-based).
+# Tables not listed here are auto-assigned to the master with fewest tables.
+table_assignments:
+  users: 0
+  orders: 1
+
+# How to route SELECT queries: write_master | round_robin | random
+read_policy: "write_master"
+
+# Idle stream TTL (matches libSQL default of 10s)
+stream_ttl: "10s"
+
+# Maximum incoming request body size (protects against OOM)
+max_body_bytes: 4194304  # 4 MiB
+
+replication:
+  workers: 4
+  retry_max: 3
+  retry_backoff: "1s"
+  queue_capacity: 1024

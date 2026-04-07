@@ -1,0 +1,78 @@
+services:
+
+  # ── libSQL мастера ─────────────────────────────────────────────────────────
+  master0:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    restart: unless-stopped
+    ports:
+      - "18080:8080"
+    environment:
+      SQLD_NODE: primary
+      SQLD_HTTP_LISTEN_ADDR: "0.0.0.0:8080"
+    volumes:
+      - master0_data:/var/lib/sqld
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  master1:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    restart: unless-stopped
+    ports:
+      - "18081:8080"
+    environment:
+      SQLD_NODE: primary
+      SQLD_HTTP_LISTEN_ADDR: "0.0.0.0:8080"
+    volumes:
+      - master1_data:/var/lib/sqld
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  master2:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    restart: unless-stopped
+    ports:
+      - "18082:8080"
+    environment:
+      SQLD_NODE: primary
+      SQLD_HTTP_LISTEN_ADDR: "0.0.0.0:8080"
+    volumes:
+      - master2_data:/var/lib/sqld
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # ── Оркестратор ────────────────────────────────────────────────────────────
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.docker.yaml:/etc/orchestrator/config.yaml:ro
+    depends_on:
+      master0:
+        condition: service_healthy
+      master1:
+        condition: service_healthy
+      master2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  master0_data:
+  master1_data:
+  master2_data:

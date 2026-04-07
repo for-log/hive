@@ -1,0 +1,20 @@
+listen_addr: ":8080"
+
+masters:
+  - url: "http://master0:8080"
+  - url: "http://master1:8080"
+  - url: "http://master2:8080"
+
+table_assignments: {}
+
+read_policy: "write_master"
+
+stream_ttl: "10s"
+
+max_body_bytes: 4194304  # 4 MiB
+
+replication:
+  workers: 4
+  retry_max: 3
+  retry_backoff: "1s"
+  queue_capacity: 1024
