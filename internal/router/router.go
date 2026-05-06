@@ -9,20 +9,16 @@ import (
 	gosql "github.com/hive_v2/orchestrator/internal/sql"
 )
 
-// Master holds the index and URL of a single libSQL master.
 type Master struct {
 	Index int
 	URL   string
 }
 
-// TransactionCoordinator is the seam for transaction boundary routing (BEGIN/COMMIT/ROLLBACK).
 type TransactionCoordinator interface {
-	// MasterForTx returns the master that should handle a transaction.
 	// pinned is non-nil when the stream is already mid-transaction.
 	MasterForTx(tables []string, pinned *Master) (*Master, error)
 }
 
-// Router decides which master handles a given query.
 // Construct with New; do not copy after first use.
 type Router struct {
 	masters            []Master
@@ -34,7 +30,6 @@ type Router struct {
 	crossMasterEnabled bool
 }
 
-// New creates a Router from the provided config.
 func New(cfg *config.Config, analyzer gosql.Analyzer) (*Router, error) {
 	if len(cfg.Masters) == 0 {
 		return nil, fmt.Errorf("router: no masters configured")
@@ -61,7 +56,6 @@ func New(cfg *config.Config, analyzer gosql.Analyzer) (*Router, error) {
 	return r, nil
 }
 
-// CrossMasterEnabled reports whether per-statement routing is allowed mid-transaction.
 func (r *Router) CrossMasterEnabled() bool {
 	return r.crossMasterEnabled
 }
@@ -81,7 +75,7 @@ func (r *Router) RouteQuery(sql string, pinned *Master, routePerStatement bool) 
 		return r.txCoord.MasterForTx(info.Tables, pinned)
 	}
 
-	if pinned != nil && !(routePerStatement && r.crossMasterEnabled) {
+	if pinned != nil && (!routePerStatement || !r.crossMasterEnabled) {
 		return pinned, nil
 	}
 
@@ -92,13 +86,11 @@ func (r *Router) RouteQuery(sql string, pinned *Master, routePerStatement bool) 
 	return r.routeWrite(info.Tables)
 }
 
-// RouteWrite returns the master that owns the first recognised table.
 // DDL (CREATE TABLE) also goes through here so the table gets assigned.
 func (r *Router) RouteWrite(tables []string) (*Master, error) {
 	return r.routeWrite(tables)
 }
 
-// RouteRead returns the master to use for a read query.
 func (r *Router) RouteRead(tables []string) *Master {
 	return r.routeRead(tables)
 }
@@ -138,12 +130,10 @@ func (r *Router) routeRead(tables []string) *Master {
 	}
 }
 
-// IsReadOnly returns true when sql is a read-only statement (SELECT, PRAGMA, etc.).
 func (r *Router) IsReadOnly(sql string) bool {
 	return r.analyzer.Analyze(sql).IsReadOnly
 }
 
-// singleMasterTxCoordinator routes the entire transaction to one master.
 // If the stream is already pinned (mid-tx), that master is reused.
 type singleMasterTxCoordinator struct {
 	router *Router

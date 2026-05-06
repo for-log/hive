@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -125,7 +126,7 @@ func (p *Processor) ProxyRequest(ctx context.Context, strm *stream.Stream, req S
 		copy(expandedSteps, req.Batch.Steps)
 		for i, step := range expandedSteps {
 			if step.Stmt.SQLId != nil && step.Stmt.SQL == nil {
-				resolved := strm.SQLStore[*step.Stmt.SQLId]
+				resolved := strm.SQLStore.Load(*step.Stmt.SQLId)
 				expandedSteps[i].Stmt = Stmt{
 					SQL:       &resolved,
 					Args:      step.Stmt.Args,
@@ -451,14 +452,14 @@ func (p *Processor) ResolveSQL(strm *stream.Stream, req StreamRequest) string {
 			return *req.Stmt.SQL
 		}
 		if req.Stmt.SQLId != nil {
-			return strm.SQLStore[*req.Stmt.SQLId]
+			return strm.SQLStore.Load(*req.Stmt.SQLId)
 		}
 	}
 	if req.SQL != nil {
 		return *req.SQL
 	}
 	if req.SQLId != nil {
-		return strm.SQLStore[*req.SQLId]
+		return strm.SQLStore.Load(*req.SQLId)
 	}
 	if req.Batch != nil && len(req.Batch.Steps) > 0 {
 		step := req.Batch.Steps[0]
@@ -466,7 +467,7 @@ func (p *Processor) ResolveSQL(strm *stream.Stream, req StreamRequest) string {
 			return *step.Stmt.SQL
 		}
 		if step.Stmt.SQLId != nil {
-			return strm.SQLStore[*step.Stmt.SQLId]
+			return strm.SQLStore.Load(*step.Stmt.SQLId)
 		}
 	}
 	return ""
@@ -476,7 +477,7 @@ func (p *Processor) HandleStoreSql(strm *stream.Stream, req StreamRequest) Strea
 	if req.SQLId == nil || req.SQL == nil {
 		return ErrResult(NewError("store_sql: missing sql_id or sql"))
 	}
-	strm.SQLStore[*req.SQLId] = *req.SQL
+	strm.SQLStore.Store(*req.SQLId, *req.SQL)
 	return OkResult(StreamResponse{Type: "store_sql"})
 }
 
@@ -484,7 +485,7 @@ func (p *Processor) HandleCloseSql(strm *stream.Stream, req StreamRequest) Strea
 	if req.SQLId == nil {
 		return ErrResult(NewError("close_sql: missing sql_id"))
 	}
-	delete(strm.SQLStore, *req.SQLId)
+	strm.SQLStore.Delete(*req.SQLId)
 	return OkResult(StreamResponse{Type: "close_sql"})
 }
 
@@ -592,7 +593,7 @@ func (p *Processor) resolveStmtSQL(strm *stream.Stream, st Stmt) string {
 		return *st.SQL
 	}
 	if st.SQLId != nil && strm != nil {
-		return strm.SQLStore[*st.SQLId]
+		return strm.SQLStore.Load(*st.SQLId)
 	}
 	return ""
 }
@@ -611,14 +612,17 @@ func UpdateTxState(strm *stream.Stream, sql string, master *router.Master) {
 // into ch. The first line (header baton) is sent to headerBaton; ch is closed
 // when the body is exhausted or ctx is cancelled.
 func ParseCursorEntries(ctx context.Context, resp *http.Response, headerBaton chan<- *string, ch chan<- CursorChunk) {
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 	defer close(ch)
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 
 	firstLine := true
-	var batch []json.RawMessage
+	batch := make([]json.RawMessage, 0, 64)
 
 	flush := func(done bool, err error) bool {
 		select {

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
 
 	"github.com/hive_v2/orchestrator/internal/config"
 	"github.com/hive_v2/orchestrator/internal/hrana"
@@ -22,10 +22,6 @@ import (
 	gosql "github.com/hive_v2/orchestrator/internal/sql"
 	"github.com/hive_v2/orchestrator/internal/ws"
 )
-
-// ---------------------------------------------------------------------------
-// Fakes
-// ---------------------------------------------------------------------------
 
 type fakePipelineDoer struct {
 	resp *hrana.PipelineResponse
@@ -43,10 +39,6 @@ func (f *fakePipelineDoer) Cursor(_ context.Context, _ *hrana.CursorRequest) (*h
 type fakePool struct{ doer hrana.MasterDoer }
 
 func (p *fakePool) ClientFor(_ int) hrana.MasterDoer { return p.doer }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 func newTestHandler(t *testing.T, doer hrana.MasterDoer) *ws.Handler {
 	t.Helper()
@@ -92,7 +84,7 @@ func connectWS(t *testing.T, srv *httptest.Server) (*websocket.Conn, context.Can
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		conn.CloseNow()
+		_ = conn.CloseNow()
 		cancel()
 	})
 	return conn, cancel
@@ -127,10 +119,6 @@ func sendRequest(t *testing.T, ctx context.Context, conn *websocket.Conn, reqID 
 	require.NoError(t, err)
 	return resp
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 func TestHandler_HelloHandshake(t *testing.T) {
 	t.Parallel()
@@ -484,7 +472,7 @@ func TestHandler_TwoConnectionsParallel(t *testing.T) {
 				t.Errorf("conn%d: dial: %v", idx, err)
 				return
 			}
-			defer conn.CloseNow()
+			defer func() { _ = conn.CloseNow() }()
 
 			send := func(reqID int32, payload any) ws.ServerMsg {
 				raw, _ := json.Marshal(payload)

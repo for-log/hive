@@ -11,7 +11,6 @@ import (
 	"sync"
 )
 
-// EntryType identifies the kind of WAL record.
 type EntryType uint8
 
 const (
@@ -78,7 +77,6 @@ func (w *WAL) Append(e Entry) error {
 	return nil
 }
 
-// Close closes the underlying file.
 func (w *WAL) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -90,7 +88,6 @@ func (w *WAL) Close() error {
 	return err
 }
 
-// Path returns the file path this WAL was opened with.
 func (w *WAL) Path() string {
 	return w.path
 }

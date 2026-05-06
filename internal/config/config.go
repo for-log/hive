@@ -17,13 +17,11 @@ const (
 	ReadPolicyRandom      ReadPolicy = "random"
 )
 
-// MasterConfig holds connection settings for a single libSQL master.
 type MasterConfig struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token"`
 }
 
-// ReplicationConfig holds settings for the async replicator.
 type ReplicationConfig struct {
 	Workers       int           `yaml:"workers"`
 	RetryMax      int           `yaml:"retry_max"`
@@ -31,20 +29,17 @@ type ReplicationConfig struct {
 	QueueCapacity int           `yaml:"queue_capacity"`
 }
 
-// TransactionConfig controls cross-master transaction behaviour.
 type TransactionConfig struct {
 	CrossMasterEnabled bool          `yaml:"cross_master_enabled"`
 	CommitTimeout      time.Duration `yaml:"commit_timeout"`
 }
 
-// WALConfig enables an on-disk transaction log for best-effort crash recovery.
 type WALConfig struct {
 	Enabled         bool          `yaml:"enabled"`
 	Path            string        `yaml:"path"`
 	CompactInterval time.Duration `yaml:"compact_interval"`
 }
 
-// Config is the root configuration for the orchestrator.
 type Config struct {
 	ListenAddr       string            `yaml:"listen_addr"`
 	Masters          []MasterConfig    `yaml:"masters"`
@@ -57,7 +52,6 @@ type Config struct {
 	WAL              WALConfig         `yaml:"wal"`
 }
 
-// defaults fills in zero-value fields with sensible defaults.
 func (c *Config) defaults() {
 	if c.ListenAddr == "" {
 		c.ListenAddr = ":8080"
@@ -120,13 +114,12 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// Load reads a YAML config file from path, applies defaults and validates it.
 func Load(path string) (*Config, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: open %q: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var cfg Config
 	dec := yaml.NewDecoder(f)

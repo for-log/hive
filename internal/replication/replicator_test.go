@@ -16,10 +16,6 @@ import (
 	"github.com/hive_v2/orchestrator/internal/replication"
 )
 
-// ---------------------------------------------------------------------------
-// Fakes
-// ---------------------------------------------------------------------------
-
 // recordExecutor records every SQL it receives.
 type recordExecutor struct {
 	mu    sync.Mutex
@@ -83,10 +79,6 @@ func (e *failThenSucceedExecutor) Pipeline(ctx context.Context, req *hrana.Pipel
 	return e.pool.delegate.Pipeline(ctx, req)
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 func newReplicator(t *testing.T, pool replication.ExecutorPool, masterCount, workers int) (*replication.Replicator, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -111,10 +103,6 @@ func waitForCalls(t *testing.T, exec *recordExecutor, n int) {
 	}
 	t.Fatalf("timed out waiting for %d calls, got %d", n, len(exec.SQLs()))
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 func TestReplicator_ReplicatesToAllExceptOrigin(t *testing.T) {
 	pool := newRecordPool(3)

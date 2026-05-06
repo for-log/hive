@@ -119,7 +119,7 @@ func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request, genStr st
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	outPath, err := h.vacuumExportToPath(ctx, db)
 	if err != nil {
 		h.logError("sync export: materialize file", err)
@@ -134,7 +134,7 @@ func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request, genStr st
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.WriteHeader(http.StatusOK)
 	if _, err := io.Copy(w, f); err != nil {
@@ -148,7 +148,7 @@ func (h *Handler) openMemoryDBFromDump(ctx context.Context, sqlDump string) (*sq
 		return nil, fmt.Errorf("open memory db: %w", err)
 	}
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("ping: %w", err)
 	}
 	for _, stmt := range splitStatements(sqlDump) {

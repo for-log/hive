@@ -152,11 +152,11 @@ func TestStream_SQLStore(t *testing.T) {
 	s, err := m.Create()
 	require.NoError(t, err)
 
-	s.SQLStore[1] = "SELECT * FROM users"
-	s.SQLStore[2] = "INSERT INTO orders VALUES (?)"
+	s.SQLStore.Store(1, "SELECT * FROM users")
+	s.SQLStore.Store(2, "INSERT INTO orders VALUES (?)")
 
 	got, err := m.Get(s.ClientBaton)
 	require.NoError(t, err)
-	assert.Equal(t, "SELECT * FROM users", got.SQLStore[1])
-	assert.Equal(t, "INSERT INTO orders VALUES (?)", got.SQLStore[2])
+	assert.Equal(t, "SELECT * FROM users", got.SQLStore.Load(1))
+	assert.Equal(t, "INSERT INTO orders VALUES (?)", got.SQLStore.Load(2))
 }

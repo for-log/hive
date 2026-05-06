@@ -14,34 +14,28 @@ import (
 	"github.com/hive_v2/orchestrator/internal/txlog"
 )
 
-// MasterClientPool provides a Hrana client for a given master index.
 // Defined here (consumer side) so the server package owns the abstraction.
 type MasterClientPool interface {
 	ClientFor(masterIndex int) MasterDoer
 }
 
-// MasterDoer combines all upstream operations a master client must support.
 type MasterDoer interface {
 	PipelineDoer
 	CursorDoer
 }
 
-// PipelineDoer executes a single pipeline request against a master.
 type PipelineDoer interface {
 	Pipeline(ctx context.Context, req *PipelineRequest) (*PipelineResponse, error)
 }
 
-// CursorDoer opens a /v3/cursor streaming response from a master.
 type CursorDoer interface {
 	Cursor(ctx context.Context, req *CursorRequest) (*http.Response, error)
 }
 
-// DumpProvider returns the aggregated SQL dump of all masters.
 type DumpProvider interface {
 	Dump(ctx context.Context) (string, error)
 }
 
-// WriteReplicator fans out a write statement to all non-origin masters.
 type WriteReplicator interface {
 	Enqueue(sql string, originMaster int)
 	// EnqueueTxn applies sqls as one logical transaction on each non-origin master
@@ -49,14 +43,12 @@ type WriteReplicator interface {
 	EnqueueTxn(sqls []string, originMaster int)
 }
 
-// Logger is a minimal logging interface so the server stays decoupled from
-// any specific logging library.
+// Decouples the server from any specific logging library.
 type Logger interface {
 	Info(msg string)
 	Error(msg string, err error)
 }
 
-// ServerConfig groups all dependencies for the HTTP server.
 type ServerConfig struct {
 	Pool          MasterClientPool
 	Router        *router.Router
@@ -70,7 +62,6 @@ type ServerConfig struct {
 	CommitTimeout time.Duration
 }
 
-// Server is the HRANA-compatible HTTP handler.
 // Register it with http.ServeMux via Register.
 type Server struct {
 	cfg  ServerConfig
@@ -95,7 +86,6 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 }
 
-// Register mounts all endpoints onto mux.
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v2/pipeline", s.handlePipeline)
 	mux.HandleFunc("POST /v3/pipeline", s.handlePipeline)
@@ -327,7 +317,7 @@ func (s *Server) handleCursor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	defer upResp.Body.Close()
+	defer func() { _ = upResp.Body.Close() }()
 
 	// First line is the header — parse it to capture the upstream baton and
 	// emit a rewritten header with the rotated client baton.

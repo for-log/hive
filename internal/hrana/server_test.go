@@ -21,10 +21,6 @@ import (
 	"github.com/hive_v2/orchestrator/internal/stream"
 )
 
-// ---------------------------------------------------------------------------
-// Fakes
-// ---------------------------------------------------------------------------
-
 // fakeMasterDoer records pipeline calls and returns a canned response.
 // It also satisfies CursorDoer (unused in unit tests).
 type fakePipelineDoer struct {
@@ -49,10 +45,6 @@ func (p *fakePool) ClientFor(_ int) hrana.MasterDoer { return p.doer }
 type fakeDump struct{ dump string }
 
 func (d *fakeDump) Dump(_ context.Context) (string, error) { return d.dump, nil }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 func newTestServer(t *testing.T, doer hrana.MasterDoer) (*hrana.Server, *stream.Manager) {
 	t.Helper()
@@ -99,10 +91,6 @@ func postPipeline(t *testing.T, srv *hrana.Server, req hrana.PipelineRequest) *h
 	mux.ServeHTTP(w, r)
 	return w
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 func TestServer_Health(t *testing.T) {
 	srv, _ := newTestServer(t, nil)

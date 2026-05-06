@@ -27,7 +27,7 @@ type Connection struct {
 
 	mu       sync.Mutex
 	streams  map[int32]*wsStream
-	sqlStore map[int32]string
+	sqlStore *stream.SQLCache
 	cursors  map[int32]*cursorState
 }
 
@@ -35,7 +35,7 @@ func newConnection(proc *hrana.Processor) *Connection {
 	return &Connection{
 		proc:     proc,
 		streams:  make(map[int32]*wsStream),
-		sqlStore: make(map[int32]string),
+		sqlStore: stream.NewSQLCache(),
 		cursors:  make(map[int32]*cursorState),
 	}
 }
@@ -71,15 +71,11 @@ func (c *Connection) closeStream(streamID int32) {
 }
 
 func (c *Connection) storeSQL(sqlID int32, sql string) {
-	c.mu.Lock()
-	c.sqlStore[sqlID] = sql
-	c.mu.Unlock()
+	c.sqlStore.Store(sqlID, sql)
 }
 
 func (c *Connection) closeSQL(sqlID int32) {
-	c.mu.Lock()
-	delete(c.sqlStore, sqlID)
-	c.mu.Unlock()
+	c.sqlStore.Delete(sqlID)
 }
 
 func (c *Connection) openCursor(ctx context.Context, cursorID int32, streamID int32, batch hrana.Batch) error {
@@ -132,7 +128,7 @@ func (c *Connection) fetchCursor(cursorID int32, maxCount int32) ([]CursorEntry,
 		return nil, false, hrana.NewError("cursor not found")
 	}
 
-	var entries []CursorEntry
+	entries := make([]CursorEntry, 0, maxCount)
 	remaining := int(maxCount)
 
 	for remaining > 0 {
@@ -190,9 +186,7 @@ func (c *Connection) buildStreamRequest(req ClientRequest) hrana.StreamRequest {
 		if req.Stmt != nil {
 			stmt := *req.Stmt
 			if stmt.SQLId != nil && stmt.SQL == nil {
-				c.mu.Lock()
-				sql := c.sqlStore[*stmt.SQLId]
-				c.mu.Unlock()
+				sql := c.sqlStore.Load(*stmt.SQLId)
 				stmt.SQL = &sql
 				stmt.SQLId = nil
 			}
@@ -217,4 +211,3 @@ func (c *Connection) buildStreamRequest(req ClientRequest) hrana.StreamRequest {
 	}
 	return sr
 }
-

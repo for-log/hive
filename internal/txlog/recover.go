@@ -14,7 +14,6 @@ type PendingTx struct {
 	rollbackSeen bool
 }
 
-// NeedsCommit returns true when commit was started but some masters never acknowledged.
 func (p PendingTx) NeedsCommit() bool {
 	if !p.commitSeen || p.completeSeen || p.rollbackSeen {
 		return false
@@ -27,7 +26,6 @@ func (p PendingTx) NeedsCommit() bool {
 	return false
 }
 
-// MastersPendingCommit returns master indices that still need a COMMIT after a partial fan-out.
 func (p PendingTx) MastersPendingCommit() []int {
 	if !p.NeedsCommit() {
 		return nil
@@ -42,7 +40,6 @@ func (p PendingTx) MastersPendingCommit() []int {
 	return out
 }
 
-// NeedsRollback is true for an abandoned transaction (never reached commit on WAL).
 func (p PendingTx) NeedsRollback() bool {
 	if p.completeSeen || p.rollbackSeen || p.commitSeen {
 		return false
@@ -50,7 +47,6 @@ func (p PendingTx) NeedsRollback() bool {
 	return len(p.AllMasters) > 0 || len(p.Statements) > 0 || p.State == EntryBegin
 }
 
-// MastersForRollback returns masters that may hold an open transaction.
 func (p PendingTx) MastersForRollback() []int {
 	var out []int
 	for m := range p.AllMasters {
@@ -60,7 +56,6 @@ func (p PendingTx) MastersForRollback() []int {
 	return out
 }
 
-// Recover scans WAL entries in order and returns transactions that need commit fan-out or rollback.
 func Recover(entries []Entry) []PendingTx {
 	byTx := make(map[string]*aggTx)
 

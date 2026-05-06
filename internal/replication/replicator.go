@@ -19,17 +19,14 @@ type Task struct {
 	OriginMaster int
 }
 
-// MasterExecutor executes a single SQL statement on a master via Hrana.
 type MasterExecutor interface {
 	Pipeline(ctx context.Context, req *hrana.PipelineRequest) (*hrana.PipelineResponse, error)
 }
 
-// ExecutorPool provides a Hrana executor for a given master index.
 type ExecutorPool interface {
 	ClientFor(masterIndex int) MasterExecutor
 }
 
-// GRPCForwarder sends a raw gRPC request body to a specific master.
 type GRPCForwarder interface {
 	ForwardGRPC(ctx context.Context, masterIdx int, path string, body []byte) error
 }
@@ -39,15 +36,11 @@ type Logger interface {
 	Error(msg string, err error)
 }
 
-// TargetNamer resolves a replication target index to a human-readable name.
 // When nil, the replicator falls back to "master[N]".
 type TargetNamer interface {
 	TargetName(index int) string
 }
 
-// Replicator fans out write statements to all masters except the origin.
-// Supports two modes: raw gRPC body forwarding (preferred for gRPC clients)
-// and Hrana SQL replay (for Hrana HTTP/WS clients).
 // Uses a bounded channel as a work queue with a fixed pool of workers.
 // Dropped tasks (queue full) are counted but not retried.
 type Replicator struct {
@@ -62,7 +55,6 @@ type Replicator struct {
 	namer        TargetNamer
 }
 
-// New starts worker goroutines that stop when ctx is cancelled.
 func New(ctx context.Context, cfg config.ReplicationConfig, masterCount int, pool ExecutorPool, logger Logger) *Replicator {
 	r := &Replicator{
 		pool:         pool,
@@ -83,17 +75,14 @@ func (r *Replicator) SetTargetNamer(n TargetNamer) {
 	r.namer = n
 }
 
-// SetGRPCForwarder configures raw gRPC forwarding for replication.
 func (r *Replicator) SetGRPCForwarder(f GRPCForwarder) {
 	r.grpc = f
 }
 
-// Enqueue adds a Hrana SQL replication task.
 func (r *Replicator) Enqueue(sql string, originMaster int) {
 	r.enqueue(Task{SQL: sql, OriginMaster: originMaster}, truncate(sql, 60))
 }
 
-// EnqueueTxn replicates a series of SQL statements as one upstream transaction per target master.
 func (r *Replicator) EnqueueTxn(sqls []string, originMaster int) {
 	if len(sqls) == 0 {
 		return
@@ -104,7 +93,6 @@ func (r *Replicator) EnqueueTxn(sqls []string, originMaster int) {
 	r.enqueue(Task{SQLBatch: cp, OriginMaster: originMaster}, label)
 }
 
-// EnqueueGRPC adds a raw gRPC body forwarding task.
 // The same bytes that the origin master received are sent to all other masters.
 func (r *Replicator) EnqueueGRPC(body []byte, path string, originMaster int) {
 	cp := make([]byte, len(body))
@@ -123,12 +111,10 @@ func (r *Replicator) enqueue(task Task, label string) {
 	}
 }
 
-// Dropped returns the number of tasks dropped due to a full queue.
 func (r *Replicator) Dropped() uint64 {
 	return r.dropped.Load()
 }
 
-// DrainAndStop processes remaining queued tasks up to the given timeout.
 // Should be called during graceful shutdown after the HTTP server has stopped
 // accepting new requests.
 func (r *Replicator) DrainAndStop(timeout time.Duration) {

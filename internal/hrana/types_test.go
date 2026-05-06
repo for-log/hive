@@ -10,10 +10,6 @@ import (
 	"github.com/hive_v2/orchestrator/internal/hrana"
 )
 
-// ---------------------------------------------------------------------------
-// Value JSON round-trip
-// ---------------------------------------------------------------------------
-
 func TestValue_MarshalUnmarshal(t *testing.T) {
 	t.Parallel()
 
@@ -125,10 +121,6 @@ func TestValue_UnmarshalErrors(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// StreamResponse helpers
-// ---------------------------------------------------------------------------
-
 func TestStreamResponse_ExecuteResult(t *testing.T) {
 	t.Parallel()
 
@@ -165,10 +157,6 @@ func TestStreamResponse_BatchResultValue(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, res.StepResults, 1)
 }
-
-// ---------------------------------------------------------------------------
-// Convenience constructors
-// ---------------------------------------------------------------------------
 
 func TestConvenienceConstructors(t *testing.T) {
 	t.Parallel()
@@ -211,10 +199,6 @@ func TestConvenienceConstructors(t *testing.T) {
 		assert.Equal(t, "boom", res.Error.Message)
 	})
 }
-
-// ---------------------------------------------------------------------------
-// PipelineRequest JSON round-trip
-// ---------------------------------------------------------------------------
 
 func TestPipelineRequest_JSON(t *testing.T) {
 	t.Parallel()

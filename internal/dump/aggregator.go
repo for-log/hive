@@ -7,14 +7,10 @@ import (
 	"sync"
 )
 
-// MasterDumper fetches a full SQL dump from a single master.
 type MasterDumper interface {
 	Dump(ctx context.Context) (string, error)
 }
 
-// Aggregator collects SQL dumps from all masters and merges them into a single
-// SQLite-compatible SQL script.
-//
 // The merge strategy is additive: tables owned by different masters are
 // concatenated. If the same table appears in multiple masters (e.g. during a
 // migration) the last dump wins for that table — acceptable because the
@@ -23,7 +19,6 @@ type Aggregator struct {
 	dumpers []MasterDumper
 }
 
-// New creates an Aggregator backed by the provided dumpers (one per master).
 func New(dumpers []MasterDumper) *Aggregator {
 	return &Aggregator{dumpers: dumpers}
 }
@@ -34,7 +29,6 @@ type dumpResult struct {
 	err  error
 }
 
-// Dump fetches dumps from all masters concurrently and merges them.
 // If any master fails, an error is returned and no partial dump is produced.
 func (a *Aggregator) Dump(ctx context.Context) (string, error) {
 	results := make([]dumpResult, len(a.dumpers))
@@ -83,7 +77,6 @@ func merge(results []dumpResult) string {
 	return sb.String()
 }
 
-// stripPragmaFK removes PRAGMA foreign_keys=... lines from a SQL dump body.
 func stripPragmaFK(body string) string {
 	lines := strings.Split(body, "\n")
 	out := lines[:0]

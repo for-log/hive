@@ -3,11 +3,12 @@ module github.com/hive_v2/orchestrator
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/net v0.52.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
-	nhooyr.io/websocket v1.8.17
+	modernc.org/sqlite v1.48.1
 )
 
 require (
@@ -23,5 +24,4 @@ require (
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.48.1 // indirect
 )

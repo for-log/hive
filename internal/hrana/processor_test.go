@@ -101,7 +101,7 @@ func TestProcessor_ReplicationAutocommitImmediate(t *testing.T) {
 	})
 	strm := &stream.Stream{
 		MasterBatons: map[int]string{0: "b0"},
-		SQLStore:     map[int32]string{},
+		SQLStore:     stream.NewSQLCache(),
 	}
 	sql := "INSERT INTO t VALUES (1)"
 	res, err := p.ProxyRequest(ctx, strm, ExecuteRequest(sql, false))
@@ -122,7 +122,7 @@ func TestProcessor_ReplicationTxBufferedUntilCommit(t *testing.T) {
 	})
 	strm := &stream.Stream{
 		MasterBatons: map[int]string{0: "b0"},
-		SQLStore:     map[int32]string{},
+		SQLStore:     stream.NewSQLCache(),
 	}
 	begin := "BEGIN"
 	ins := "INSERT INTO t VALUES (1)"
@@ -158,7 +158,7 @@ func TestProcessor_DuplicateBeginPreservesBufferedReplication(t *testing.T) {
 	})
 	strm := &stream.Stream{
 		MasterBatons: map[int]string{0: "b0"},
-		SQLStore:     map[int32]string{},
+		SQLStore:     stream.NewSQLCache(),
 	}
 	ins1 := "INSERT INTO t VALUES (1)"
 	ins2 := "INSERT INTO t VALUES (2)"
@@ -204,7 +204,7 @@ func TestProcessor_ReplicationTxRollbackNoReplicate(t *testing.T) {
 	})
 	strm := &stream.Stream{
 		MasterBatons: map[int]string{0: "b0"},
-		SQLStore:     map[int32]string{},
+		SQLStore:     stream.NewSQLCache(),
 	}
 	res, err := p.ProxyRequest(ctx, strm, ExecuteRequest("BEGIN", false))
 	require.NoError(t, err)

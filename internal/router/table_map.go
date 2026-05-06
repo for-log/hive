@@ -5,13 +5,10 @@ import (
 	"sync"
 )
 
-// TableMap maintains the assignment of table names to master indices.
-// All methods are safe for concurrent use.
 type TableMap struct {
 	mu          sync.RWMutex
 	assignments map[string]int // table name -> master index
 	masterCount int
-	nextMaster  int // round-robin counter for auto-assignment
 }
 
 func NewTableMap(masterCount int, initial map[string]int) (*TableMap, error) {
@@ -31,7 +28,6 @@ func NewTableMap(masterCount int, initial map[string]int) (*TableMap, error) {
 	}, nil
 }
 
-// MasterFor returns the master index for the given table.
 // If the table is not yet assigned, it is auto-assigned to the master
 // with the fewest tables (ties broken by round-robin).
 func (m *TableMap) MasterFor(table string) int {
@@ -64,7 +60,6 @@ func (m *TableMap) Assign(table string, masterIdx int) error {
 	return nil
 }
 
-// Snapshot returns a copy of the current assignments.
 func (m *TableMap) Snapshot() map[string]int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

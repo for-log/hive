@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 
 	"github.com/hive_v2/orchestrator/internal/hrana"
 	"github.com/hive_v2/orchestrator/internal/router"
@@ -51,7 +51,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	if conn.Subprotocol() != "hrana3" {
 		_ = conn.Close(websocket.StatusPolicyViolation, "unsupported subprotocol")

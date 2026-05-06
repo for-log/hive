@@ -12,10 +12,6 @@ import (
 	"github.com/hive_v2/orchestrator/internal/dump"
 )
 
-// ---------------------------------------------------------------------------
-// Fakes
-// ---------------------------------------------------------------------------
-
 type fakeDumper struct {
 	body string
 	err  error
@@ -24,10 +20,6 @@ type fakeDumper struct {
 func (f *fakeDumper) Dump(_ context.Context) (string, error) {
 	return f.body, f.err
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 func TestAggregator_MergesTwoDumps(t *testing.T) {
 	agg := dump.New([]dump.MasterDumper{

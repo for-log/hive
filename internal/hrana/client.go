@@ -12,7 +12,6 @@ import (
 
 const defaultMaxResponseBytes = 32 * 1024 * 1024 // 32 MiB
 
-// Client sends Hrana HTTP requests to a single libSQL master.
 // Construct with NewClient; do not copy after first use.
 type Client struct {
 	baseURL    string
@@ -47,7 +46,6 @@ func NewClient(cfg ClientConfig) *Client {
 	}
 }
 
-// Pipeline executes a pipeline request against /v2/pipeline.
 func (c *Client) Pipeline(ctx context.Context, req *PipelineRequest) (*PipelineResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -67,7 +65,7 @@ func (c *Client) Pipeline(ctx context.Context, req *PipelineRequest) (*PipelineR
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}()
 
 	if err := checkStatus(resp); err != nil {
@@ -81,10 +79,8 @@ func (c *Client) Pipeline(ctx context.Context, req *PipelineRequest) (*PipelineR
 	return &out, nil
 }
 
-// Cursor opens a /v3/cursor streaming request against the master.
 // The caller receives the raw HTTP response body (chunked, newline-delimited JSON)
-// and is responsible for closing it. The first line is the CursorResponseHeader.
-// Returns an error only if the HTTP request itself fails or the server returns non-200.
+// and is responsible for closing it.
 func (c *Client) Cursor(ctx context.Context, req *CursorRequest) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -104,13 +100,12 @@ func (c *Client) Cursor(ctx context.Context, req *CursorRequest) (*http.Response
 		return nil, fmt.Errorf("hrana client: cursor: %w", err)
 	}
 	if err := checkStatus(resp); err != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, err
 	}
 	return resp, nil
 }
 
-// Describe sends a single "describe" request and returns the DescribeResult.
 // Uses a fresh (baton-less) pipeline so it is safe to call at any time.
 func (c *Client) Describe(ctx context.Context, sql string) (*DescribeResult, error) {
 	req := &PipelineRequest{
@@ -136,7 +131,6 @@ func (c *Client) Describe(ctx context.Context, sql string) (*DescribeResult, err
 	return res.Response.DescribeResultValue()
 }
 
-// Dump fetches the full SQL dump from /dump (SQLite-compatible format).
 func (c *Client) Dump(ctx context.Context) (string, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/dump", nil)
 	if err != nil {
@@ -150,7 +144,7 @@ func (c *Client) Dump(ctx context.Context) (string, error) {
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}()
 
 	if err := checkStatus(resp); err != nil {
@@ -164,7 +158,6 @@ func (c *Client) Dump(ctx context.Context) (string, error) {
 	return string(data), nil
 }
 
-// Health checks /health and returns nil when the master is healthy.
 func (c *Client) Health(ctx context.Context) error {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
 	if err != nil {
@@ -178,13 +171,12 @@ func (c *Client) Health(ctx context.Context) error {
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}()
 
 	return checkStatus(resp)
 }
 
-// Version returns the server version string from /version.
 func (c *Client) Version(ctx context.Context) (string, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/version", nil)
 	if err != nil {
@@ -198,7 +190,7 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}()
 
 	if err := checkStatus(resp); err != nil {
@@ -218,8 +210,7 @@ func (c *Client) setAuth(r *http.Request) {
 	}
 }
 
-// checkStatus returns an error for non-2xx responses, attempting to parse
-// the body as a Hrana Error structure first.
+// Attempts to parse the body as a Hrana Error structure for a richer message.
 func checkStatus(resp *http.Response) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil

@@ -12,6 +12,35 @@ import (
 	"github.com/hive_v2/orchestrator/internal/transaction"
 )
 
+// SQLCache is a concurrency-safe store for SQL texts registered via store_sql.
+type SQLCache struct {
+	mu sync.RWMutex
+	m  map[int32]string
+}
+
+func NewSQLCache() *SQLCache {
+	return &SQLCache{m: make(map[int32]string)}
+}
+
+func (c *SQLCache) Store(id int32, sql string) {
+	c.mu.Lock()
+	c.m[id] = sql
+	c.mu.Unlock()
+}
+
+func (c *SQLCache) Load(id int32) string {
+	c.mu.RLock()
+	v := c.m[id]
+	c.mu.RUnlock()
+	return v
+}
+
+func (c *SQLCache) Delete(id int32) {
+	c.mu.Lock()
+	delete(c.m, id)
+	c.mu.Unlock()
+}
+
 type Stream struct {
 	// ClientBaton is the token returned to the client; it changes on every
 	// pipeline response to force serial request ordering (per Hrana spec).
@@ -25,9 +54,7 @@ type Stream struct {
 	// All subsequent statements are routed here until COMMIT/ROLLBACK.
 	PinnedMaster *router.Master
 
-	// SQLStore caches SQL texts registered via store_sql requests.
-	// Keyed by the client-assigned sql_id.
-	SQLStore map[int32]string
+	SQLStore *SQLCache
 
 	// TxWALID is the stream ClientBaton captured when the current txn started; used for tx WAL correlation.
 	TxWALID string
@@ -40,7 +67,6 @@ type Stream struct {
 
 func (s *Stream) touch() { s.lastUsed = time.Now() }
 
-// InTransaction is true after BEGIN (pinning or lazy cross-master) until COMMIT/ROLLBACK completes.
 func (s *Stream) InTransaction() bool {
 	if s.PinnedMaster != nil {
 		return true
@@ -51,7 +77,6 @@ func (s *Stream) InTransaction() bool {
 	return false
 }
 
-// LazyCrossTxActive is true during a client transaction when statements are routed per master.
 func (s *Stream) LazyCrossTxActive() bool {
 	return s.TxBuffer != nil && s.TxBuffer.Active
 }
@@ -60,8 +85,6 @@ func (s *Stream) LazyCrossTxActive() bool {
 // Implementations should send ROLLBACK to upstream masters.
 type EvictFunc func(s *Stream)
 
-// Manager creates, resolves, and expires Streams.
-// All methods are safe for concurrent use.
 type Manager struct {
 	mu      sync.Mutex
 	streams map[string]*Stream
@@ -69,7 +92,6 @@ type Manager struct {
 	onEvict EvictFunc
 }
 
-// NewManager creates a Manager and starts a background TTL reaper.
 // The reaper stops when ctx is cancelled.
 // onEvict is called (if non-nil) for each expired stream that had an active transaction.
 func NewManager(ctx context.Context, ttl time.Duration, onEvict EvictFunc) *Manager {
@@ -82,7 +104,6 @@ func NewManager(ctx context.Context, ttl time.Duration, onEvict EvictFunc) *Mana
 	return m
 }
 
-// Create allocates a new Stream and returns its initial baton.
 func (m *Manager) Create() (*Stream, error) {
 	baton, err := newBaton()
 	if err != nil {
@@ -91,7 +112,7 @@ func (m *Manager) Create() (*Stream, error) {
 	s := &Stream{
 		ClientBaton:  baton,
 		MasterBatons: make(map[int]string),
-		SQLStore:     make(map[int32]string),
+		SQLStore:     NewSQLCache(),
 		lastUsed:     time.Now(),
 	}
 	m.mu.Lock()
@@ -112,7 +133,6 @@ func (m *Manager) Get(baton string) (*Stream, error) {
 	return s, nil
 }
 
-// Rotate issues a new client baton for the stream, replacing the old one.
 // Must be called after every successful pipeline response (Hrana spec §baton).
 func (m *Manager) Rotate(s *Stream) (string, error) {
 	newBaton, err := newBaton()
@@ -128,7 +148,6 @@ func (m *Manager) Rotate(s *Stream) (string, error) {
 	return newBaton, nil
 }
 
-// Close removes the stream from the manager, releasing all resources.
 func (m *Manager) Close(s *Stream) {
 	m.mu.Lock()
 	delete(m.streams, s.ClientBaton)

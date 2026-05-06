@@ -338,7 +338,7 @@ func tokenize(sql string) []string {
 		// Block comment
 		if i+1 < len(r) && r[i] == '/' && r[i+1] == '*' {
 			i += 2
-			for i+1 < len(r) && !(r[i] == '*' && r[i+1] == '/') {
+			for i+1 < len(r) && (r[i] != '*' || r[i+1] != '/') {
 				i++
 			}
 			// Advance past closing */ only if it is present; otherwise we
