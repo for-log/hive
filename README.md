@@ -1,76 +1,76 @@
 # Hive v2
 
-Оркестратор для нескольких libSQL-мастеров. Принимает клиентские подключения по нативному протоколу libSQL (Hrana v1/v2/v3 HTTP + WebSocket, gRPC embedded replica) и прозрачно распределяет запросы между мастерами по принципу «один владелец таблицы».
+Оркестратор для нескольких libSQL-мастеров. Принимает подключения по протоколам libSQL (Hrana HTTP, WebSocket, gRPC) и распределяет запросы между мастерами — каждая таблица принадлежит одному мастеру.
 
 ## Архитектура
 
+```mermaid
+graph LR
+    subgraph clients["Клиенты"]
+        direction TB
+        c1["HTTP"]
+        c2["WebSocket"]
+        c3["gRPC"]
+    end
+
+    subgraph orch["Оркестратор"]
+        direction TB
+        anal["SQL-анализатор"]
+        route["Маршрутизатор<br/><small>TableMap + политика чтения</small>"]
+        repl["Репликатор"]
+        anal --> route
+        route -.->|"write"| repl
+    end
+
+    subgraph storage["Узлы хранения"]
+        direction TB
+        m0["libSQL 0"]
+        m1["libSQL 1"]
+        m2["libSQL 2"]
+    end
+
+    clients -->|"запросы"| orch
+    route -->|"проксирование"| storage
+    repl -.->|"async репликация"| storage
 ```
-                        ┌─────────────────────────────────────────────┐
-                        │              Orchestrator :8080              │
-                        │                                              │
-  libsql client  ──────▶│  Hrana v1/v2/v3 HTTP   /v1/execute          │
-  (HTTP / WS)           │  Hrana v3 WebSocket    ws://…               │
-  go-libsql             │  gRPC proxy.Proxy      /proxy.Proxy/…       │
-  embedded replica ────▶│  WAL replication       /wal_log.…  ─────────┼──▶ master[0]
-                        │                                              │
-                        │  Router ──▶ TableMap                        │
-                        │  Replicator (async fan-out)                  │
-                        └──────┬──────────────┬──────────────┬────────┘
-                               │              │              │
-                               ▼              ▼              ▼
-                          master[0]      master[1]      master[2]
-                         libsql-server  libsql-server  libsql-server
-```
 
-Подробнее: [docs/architecture.md](docs/architecture.md)
+## Что делает
 
-## Ключевые особенности
+- **Table-owner sharding** — каждая таблица закреплена за одним мастером, конфликты записи исключены
+- **Прозрачное проксирование** — клиенты работают как с обычным libSQL
+- **Политики чтения** — `write_master`, `round_robin`, `random`
+- **Репликация** — SQL replay (Hrana) и raw gRPC forwarding, асинхронно
+- **Turso Sync** — поддержка embedded replica через HTTP sync
+- **Кросс-мастерные транзакции** — ленивый BEGIN + фан-аут COMMIT/ROLLBACK (опционально)
+- **Один порт** — HTTP/1.1, WebSocket и gRPC (h2c) на :8080
+- **4 прямых зависимости**, без фреймворков
 
-- **Table-owner sharding** — каждая таблица закреплена за одним мастером, конфликты записи исключены by design
-- **Прозрачное проксирование** — клиенты подключаются как к обычному libSQL-серверу
-- **Гибкие политики чтения** — `write_master`, `round_robin`, `random`
-- **Двойной путь репликации** — SQL replay (Hrana) и raw gRPC forwarding
-- **Turso Sync Protocol** — поддержка Python/Rust libsql embedded replica через HTTP sync
-- **Кросс-мастерные транзакции (опционально)** — при `transaction.cross_master_enabled: true` поддерживается ленивый `BEGIN` и фан-аут `COMMIT`/`ROLLBACK` на все затронутые мастера
-- **Единый порт** — HTTP/1.1, WebSocket и HTTP/2 (gRPC) через h2c
-- **Минимальные зависимости** — 4 прямых Go-зависимости, без тяжёлых фреймворков
-
-Подробнее: [docs/features.md](docs/features.md)
-
-## Поддерживаемые протоколы
+## Протоколы
 
 | Протокол | Эндпоинт | Описание |
 |---|---|---|
-| Hrana v1 HTTP | `POST /v1/execute`, `POST /v1/batch` | Stateless, без стримов |
-| Hrana v2 HTTP | `POST /v2/pipeline` | Baton-сессии |
-| Hrana v3 HTTP | `POST /v3/pipeline`, `POST /v3/cursor` | Стриминг курсоров |
-| Hrana v3 WebSocket | `ws://…` (subprotocol `hrana3`) | Полный стриминг, курсоры |
-| gRPC proxy.Proxy | `/proxy.Proxy/Execute` | Embedded replica записи |
-| WAL replication | `/wal_log.ReplicationLog/…` | Прокси к master[0] |
-| Turso Sync | `GET /info`, `GET /export/{gen}`, `GET|POST /sync/…` | Python libsql embedded replica sync |
-| Health check | `GET /health` | 200 OK |
-| Version | `GET /version` | Строка версии |
-| Dump | `GET /dump` | Агрегированный SQL-дамп |
-
-Подробнее: [docs/protocols.md](docs/protocols.md)
+| Hrana v1 | `POST /v1/execute`, `/v1/batch` | Stateless |
+| Hrana v2 | `POST /v2/pipeline` | Baton-сессии |
+| Hrana v3 | `POST /v3/pipeline`, `/v3/cursor` | Стриминг курсоров |
+| WebSocket | `ws://…` (subprotocol `hrana3`) | Полный стриминг |
+| gRPC | `/proxy.Proxy/Execute` | Embedded replica записи |
+| WAL | `/wal_log.ReplicationLog/…` | Прокси к master[0] |
+| Turso Sync | `/sync/…`, `/export/{gen}` | Python/Rust embedded replica |
+| Служебные | `/health`, `/version`, `/dump` | Мониторинг и отладка |
 
 ## Быстрый старт
 
-### Docker Compose (рекомендуется)
-
 ```bash
+# Docker Compose — три мастера + оркестратор
 docker compose up --build
-```
 
-Поднимает три libSQL-мастера (порты 18080–18082) и оркестратор на порту 8080.
-
-### Локально
-
-```bash
+# Или локально
 cp config.example.yaml config.yaml
 go build -o orchestrator ./cmd/orchestrator
 ./orchestrator config.yaml
 ```
+
+Compose поднимает три libSQL-мастера (18080–18082) и оркестратор на 8080.
 
 ## Конфигурация
 
@@ -88,7 +88,7 @@ table_assignments:
 
 read_policy: "write_master"    # write_master | round_robin | random
 stream_ttl: "10s"
-max_body_bytes: 4194304        # 4 MiB
+max_body_bytes: 4194304
 
 replication:
   workers: 4
@@ -97,92 +97,58 @@ replication:
   queue_capacity: 1024
 
 transaction:
-  cross_master_enabled: false   # true — ленивый BEGIN и COMMIT на несколько мастеров
-  commit_timeout: "30s"        # таймаут фазы фан-аут COMMIT
+  cross_master_enabled: false
+  commit_timeout: "30s"
 ```
 
-Подробнее: [docs/requirements.md](docs/requirements.md)
-
-## Подключение клиентов
-
-### go-libsql (embedded replica)
+## Подключение
 
 ```go
-connector, err := goLibsql.NewEmbeddedReplicaConnector(
-    "local.db",
-    "http://localhost:8080",
-)
+// go-libsql embedded replica
+connector, _ := goLibsql.NewEmbeddedReplicaConnector("local.db", "http://localhost:8080")
 db := sql.OpenDB(connector)
 db.Exec("INSERT INTO orders (id, amount) VALUES (1, 100)")
-connector.Sync()
-db.QueryRow("SELECT amount FROM orders WHERE id = 1")
 ```
-
-### libsql-client (HTTP / WebSocket)
-
-```go
-client, _ := libsql.NewClient("http://localhost:8080", libsql.WithAuthToken("..."))
-client, _ := libsql.NewClient("ws://localhost:8080", libsql.WithAuthToken("..."))
-```
-
-### Прямой HTTP (Hrana v1)
 
 ```bash
+# HTTP напрямую
 curl -X POST http://localhost:8080/v1/execute \
   -H "Content-Type: application/json" \
   -d '{"stmt": {"sql": "SELECT 1"}}'
 ```
 
-## Структура проекта
+## Структура
 
 ```
-hive_v2/
-├── cmd/orchestrator/       # Точка входа, DI, HTTP-сервер
-├── internal/
-│   ├── config/             # YAML-конфиг
-│   ├── dump/               # Агрегация дампов
-│   ├── grpcproxy/          # gRPC proxy.Proxy перехват
-│   ├── hrana/              # Hrana HTTP сервер + клиент
-│   ├── replication/        # Асинхронная репликация
-│   ├── router/             # Маршрутизация + TableMap
-│   ├── sql/                # SQL-анализатор
-│   ├── stream/             # Baton-менеджер
-│   ├── sync/               # Turso Sync Protocol (HTTP)
-│   └── ws/                 # Hrana v3 WebSocket
-├── docs/                   # Документация
-│   ├── architecture.md     # Архитектура
-│   ├── protocols.md        # Протоколы
-│   ├── modules.md          # Модули
-│   ├── features.md         # Особенности
-│   └── requirements.md     # Требования
-├── config.example.yaml
-├── config.docker.yaml
-├── docker-compose.yml
-└── Dockerfile
+cmd/orchestrator/       точка входа, DI, HTTP-сервер
+internal/
+├── config/             YAML-конфиг
+├── dump/               агрегация дампов
+├── grpcproxy/          gRPC proxy.Proxy
+├── hrana/              Hrana HTTP сервер + клиент
+├── replication/        асинхронная репликация
+├── router/             маршрутизация + TableMap
+├── sql/                SQL-анализатор
+├── stream/             baton-менеджер
+├── sync/               Turso Sync Protocol
+├── transaction/        буфер кросс-мастерных транзакций
+├── txlog/              WAL для crash recovery
+└── ws/                 Hrana v3 WebSocket
 ```
 
-Подробнее: [docs/modules.md](docs/modules.md)
-
-## Тестирование
+## Тесты
 
 ```bash
-go test ./...
-go run ./cmd/replica_test/   # smoke-тест (требует запущенного compose)
+go test ./...                              # юнит-тесты
+cd ../test && go test -v ./e2e/...         # e2e (требует docker compose up)
 ```
 
 ## Ограничения
 
-- **Кросс-мастерные транзакции** — по умолчанию (`transaction.cross_master_enabled: false`) транзакция, затрагивающая таблицы разных мастеров, завершится ошибкой (стрим закреплён на одном мастере). При включении `cross_master_enabled` оркестратор выполняет **буферизованную симуляцию 2PC** (ленивый `BEGIN`): `COMMIT`/`ROLLBACK` рассылаются на все мастера, куда дошла первая запись транзакции. Это **не** полноценный распределённый 2PC: нет восстановления после сбоя оркестратора (возможна частичная фиксация), нет распределённого снимка изоляции (другие клиенты могут видеть промежуточное состояние между отдельными `COMMIT` на мастерах), чтение своих записей гарантируется **в пределах каждого мастера**, но не между мастерами внутри одной транзакции до репликации.
-- **Репликация eventual consistency** — между записью и появлением данных на остальных мастерах есть задержка.
-- **WAL-прокси только к master[0]** — go-libsql embedded replica синхронизируются через master[0]. Python libsql использует Turso Sync Protocol (GET /export) для начальной загрузки.
-- **Без аутентификации на уровне оркестратора** — токены передаются напрямую мастерам.
+**Кросс-мастерные транзакции** — буферизованная симуляция 2PC, не полноценный распределённый протокол. Нет восстановления после сбоя оркестратора (возможна частичная фиксация). Read-your-writes гарантируется в пределах одного мастера, но не между мастерами до репликации.
 
-## Документация
+**Репликация** — eventual consistency, есть задержка между записью и появлением на остальных мастерах.
 
-| Документ | Описание |
-|---|---|
-| [docs/architecture.md](docs/architecture.md) | Архитектура, потоки данных, конкурентность |
-| [docs/protocols.md](docs/protocols.md) | Все поддерживаемые протоколы и форматы |
-| [docs/modules.md](docs/modules.md) | Описание каждого модуля проекта |
-| [docs/features.md](docs/features.md) | Ключевые особенности и решения |
-| [docs/requirements.md](docs/requirements.md) | Зависимости, runtime, конфигурация |
+**WAL-прокси** — embedded replica синхронизируются через master[0].
+
+**Аутентификация** — на уровне оркестратора нет, токены пробрасываются мастерам.
