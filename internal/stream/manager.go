@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hive_v2/orchestrator/internal/router"
+	"github.com/hive_v2/orchestrator/internal/transaction"
 )
 
 type Stream struct {
@@ -28,10 +29,36 @@ type Stream struct {
 	// Keyed by the client-assigned sql_id.
 	SQLStore map[int32]string
 
+	// TxWALID is the stream ClientBaton captured when the current txn started; used for tx WAL correlation.
+	TxWALID string
+
+	// TxBuffer is non-nil while cross-master lazy transactions may be active.
+	TxBuffer *transaction.TxBuffer
+
 	lastUsed time.Time
 }
 
 func (s *Stream) touch() { s.lastUsed = time.Now() }
+
+// InTransaction is true after BEGIN (pinning or lazy cross-master) until COMMIT/ROLLBACK completes.
+func (s *Stream) InTransaction() bool {
+	if s.PinnedMaster != nil {
+		return true
+	}
+	if s.TxBuffer != nil && s.TxBuffer.Active {
+		return true
+	}
+	return false
+}
+
+// LazyCrossTxActive is true during a client transaction when statements are routed per master.
+func (s *Stream) LazyCrossTxActive() bool {
+	return s.TxBuffer != nil && s.TxBuffer.Active
+}
+
+// EvictFunc is called when an expired stream had an active transaction.
+// Implementations should send ROLLBACK to upstream masters.
+type EvictFunc func(s *Stream)
 
 // Manager creates, resolves, and expires Streams.
 // All methods are safe for concurrent use.
@@ -39,14 +66,17 @@ type Manager struct {
 	mu      sync.Mutex
 	streams map[string]*Stream
 	ttl     time.Duration
+	onEvict EvictFunc
 }
 
 // NewManager creates a Manager and starts a background TTL reaper.
 // The reaper stops when ctx is cancelled.
-func NewManager(ctx context.Context, ttl time.Duration) *Manager {
+// onEvict is called (if non-nil) for each expired stream that had an active transaction.
+func NewManager(ctx context.Context, ttl time.Duration, onEvict EvictFunc) *Manager {
 	m := &Manager{
 		streams: make(map[string]*Stream),
 		ttl:     ttl,
+		onEvict: onEvict,
 	}
 	go m.reap(ctx)
 	return m
@@ -128,13 +158,21 @@ func (m *Manager) reap(ctx context.Context) {
 
 func (m *Manager) evictExpired() {
 	deadline := time.Now().Add(-m.ttl)
+	var expired []*Stream
 	m.mu.Lock()
 	for baton, s := range m.streams {
 		if s.lastUsed.Before(deadline) {
 			delete(m.streams, baton)
+			expired = append(expired, s)
 		}
 	}
 	m.mu.Unlock()
+
+	for _, s := range expired {
+		if m.onEvict != nil && s.InTransaction() {
+			m.onEvict(s)
+		}
+	}
 }
 
 // newBaton generates a cryptographically random, URL-safe token.

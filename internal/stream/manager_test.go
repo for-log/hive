@@ -15,7 +15,7 @@ func newManager(t *testing.T, ttl time.Duration) *stream.Manager {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	return stream.NewManager(ctx, ttl)
+	return stream.NewManager(ctx, ttl, nil)
 }
 
 func TestManager_CreateAndGet(t *testing.T) {

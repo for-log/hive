@@ -5,20 +5,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
 	"github.com/hive_v2/orchestrator/internal/hrana"
 	"github.com/hive_v2/orchestrator/internal/router"
+	"github.com/hive_v2/orchestrator/internal/txlog"
 )
 
 type Config struct {
-	Pool        hrana.MasterClientPool
-	Router      *router.Router
-	Replicator  hrana.WriteReplicator
-	Logger      hrana.Logger
-	MasterCount int
+	Pool          hrana.MasterClientPool
+	Router        *router.Router
+	Replicator    hrana.WriteReplicator
+	TxLog         *txlog.WAL
+	Logger        hrana.Logger
+	MasterCount   int
+	CommitTimeout time.Duration
 }
 
 type Handler struct {
@@ -30,10 +34,12 @@ func NewHandler(cfg Config) *Handler {
 	return &Handler{
 		cfg: cfg,
 		proc: hrana.NewProcessor(hrana.ProcessorConfig{
-			Pool:       cfg.Pool,
-			Router:     cfg.Router,
-			Replicator: cfg.Replicator,
-			Logger:     cfg.Logger,
+			Pool:          cfg.Pool,
+			Router:        cfg.Router,
+			Replicator:    cfg.Replicator,
+			TxLog:         cfg.TxLog,
+			Logger:        cfg.Logger,
+			CommitTimeout: cfg.CommitTimeout,
 		}),
 	}
 }
@@ -236,7 +242,7 @@ func (h *Handler) dispatchRequest(ctx context.Context, c *Connection, reqID int3
 	case "get_autocommit":
 		ws := c.getOrCreateStream(req.StreamID)
 		ws.mu.Lock()
-		isAutocommit := ws.strm.PinnedMaster == nil
+		isAutocommit := !ws.strm.InTransaction()
 		ws.mu.Unlock()
 		msg, err := responseOK(reqID, GetAutocommitResponse{IsAutocommit: isAutocommit})
 		if err != nil {

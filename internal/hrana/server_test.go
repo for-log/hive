@@ -71,7 +71,7 @@ func newTestServer(t *testing.T, doer hrana.MasterDoer) (*hrana.Server, *stream.
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	mgr := stream.NewManager(ctx, cfg.StreamTTL)
+	mgr := stream.NewManager(ctx, cfg.StreamTTL, nil)
 
 	srv := hrana.NewServer(hrana.ServerConfig{
 		Pool:         &fakePool{doer: doer},
@@ -324,7 +324,7 @@ func TestServer_Pipeline_TransactionUnpin(t *testing.T) {
 	// COMMIT — should unpin.
 	commitSQL := "COMMIT"
 	w3 := postPipeline(t, srv, hrana.PipelineRequest{
-		Baton:    baton,
+		Baton: baton,
 		Requests: []hrana.StreamRequest{
 			{Type: "execute", Stmt: &hrana.Stmt{SQL: &commitSQL}},
 		},
@@ -347,6 +347,135 @@ func TestServer_Pipeline_TransactionUnpin(t *testing.T) {
 	assert.True(t, *resp4.Results[0].Response.IsAutocommit, "stream should be unpinned after COMMIT")
 
 	_ = mgr
+}
+
+type idxMasterPool struct {
+	byIdx map[int]hrana.MasterDoer
+}
+
+func (p *idxMasterPool) ClientFor(i int) hrana.MasterDoer { return p.byIdx[i] }
+
+type flexDoer struct {
+	calls int
+}
+
+func (f *flexDoer) Pipeline(_ context.Context, req *hrana.PipelineRequest) (*hrana.PipelineResponse, error) {
+	f.calls++
+	n := len(req.Requests)
+	res := make([]hrana.StreamResult, n)
+	for i := 0; i < n; i++ {
+		typ := req.Requests[i].Type
+		if typ == "execute" {
+			raw, _ := json.Marshal(hrana.StmtResult{})
+			res[i] = hrana.OkResult(hrana.StreamResponse{Type: "execute", Result: raw})
+		} else {
+			res[i] = hrana.OkResult(hrana.StreamResponse{Type: typ})
+		}
+	}
+	return &hrana.PipelineResponse{Baton: "u-baton", Results: res}, nil
+}
+
+func (f *flexDoer) Cursor(_ context.Context, _ *hrana.CursorRequest) (*http.Response, error) {
+	return nil, fmt.Errorf("cursor not implemented")
+}
+
+func newCrossMasterTestServer(t *testing.T, flex0, flex1 *flexDoer) *hrana.Server {
+	t.Helper()
+	cfg := &config.Config{
+		Masters: []config.MasterConfig{
+			{URL: "http://m0"},
+			{URL: "http://m1"},
+		},
+		TableAssignments: map[string]int{"users": 0, "orders": 1},
+		ReadPolicy:       config.ReadPolicyWriteMaster,
+		StreamTTL:        5 * time.Second,
+		MaxBodyBytes:     1 << 20,
+		Transaction: config.TransactionConfig{
+			CrossMasterEnabled: true,
+			CommitTimeout:      time.Second,
+		},
+	}
+	rtr, err := router.New(cfg, gosql.TokenAnalyzer{})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	mgr := stream.NewManager(ctx, cfg.StreamTTL, nil)
+	pool := &idxMasterPool{byIdx: map[int]hrana.MasterDoer{0: flex0, 1: flex1}}
+	return hrana.NewServer(hrana.ServerConfig{
+		Pool:          pool,
+		Router:        rtr,
+		StreamMgr:     mgr,
+		DumpProvider:  &fakeDump{dump: "--\n"},
+		MaxBodyBytes:  cfg.MaxBodyBytes,
+		Version:       "test",
+		CommitTimeout: cfg.Transaction.CommitTimeout,
+	})
+}
+
+func TestServer_Pipeline_CrossMasterLazyTx(t *testing.T) {
+	flex0 := &flexDoer{}
+	flex1 := &flexDoer{}
+	srv := newCrossMasterTestServer(t, flex0, flex1)
+	begin := "BEGIN"
+	insU := "INSERT INTO users VALUES (1)"
+	insO := "INSERT INTO orders VALUES (2)"
+	commit := "COMMIT"
+
+	// BEGIN now sends a real upstream request to master[0] (the default).
+	w := postPipeline(t, srv, hrana.PipelineRequest{
+		Requests: []hrana.StreamRequest{{Type: "execute", Stmt: &hrana.Stmt{SQL: &begin}}},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	var r0 hrana.PipelineResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&r0))
+	baton := r0.Baton
+	assert.Equal(t, 1, flex0.calls)
+	assert.Equal(t, 0, flex1.calls)
+
+	// INSERT INTO users → master[0] (already has open tx, no extra BEGIN prepended)
+	w = postPipeline(t, srv, hrana.PipelineRequest{
+		Baton:    baton,
+		Requests: []hrana.StreamRequest{{Type: "execute", Stmt: &hrana.Stmt{SQL: &insU}}},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	var r1 hrana.PipelineResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&r1))
+	baton = r1.Baton
+	assert.Equal(t, 2, flex0.calls)
+	assert.Equal(t, 0, flex1.calls)
+
+	// INSERT INTO orders → master[1] (lazy BEGIN + INSERT)
+	w = postPipeline(t, srv, hrana.PipelineRequest{
+		Baton:    baton,
+		Requests: []hrana.StreamRequest{{Type: "execute", Stmt: &hrana.Stmt{SQL: &insO}}},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	var r2 hrana.PipelineResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&r2))
+	baton = r2.Baton
+	assert.Equal(t, 2, flex0.calls)
+	assert.Equal(t, 1, flex1.calls)
+
+	w = postPipeline(t, srv, hrana.PipelineRequest{
+		Baton:    baton,
+		Requests: []hrana.StreamRequest{{Type: "get_autocommit"}},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	var rAc hrana.PipelineResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&rAc))
+	require.Len(t, rAc.Results, 1)
+	require.NotNil(t, rAc.Results[0].Response)
+	require.NotNil(t, rAc.Results[0].Response.IsAutocommit)
+	assert.False(t, *rAc.Results[0].Response.IsAutocommit)
+
+	// COMMIT fans out to both masters
+	w = postPipeline(t, srv, hrana.PipelineRequest{
+		Baton:    rAc.Baton,
+		Requests: []hrana.StreamRequest{{Type: "execute", Stmt: &hrana.Stmt{SQL: &commit}}},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 3, flex0.calls)
+	assert.Equal(t, 2, flex1.calls)
 }
 
 func TestServer_Pipeline_BadJSON(t *testing.T) {

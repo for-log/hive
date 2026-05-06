@@ -31,6 +31,19 @@ type ReplicationConfig struct {
 	QueueCapacity int           `yaml:"queue_capacity"`
 }
 
+// TransactionConfig controls cross-master transaction behaviour.
+type TransactionConfig struct {
+	CrossMasterEnabled bool          `yaml:"cross_master_enabled"`
+	CommitTimeout      time.Duration `yaml:"commit_timeout"`
+}
+
+// WALConfig enables an on-disk transaction log for best-effort crash recovery.
+type WALConfig struct {
+	Enabled         bool          `yaml:"enabled"`
+	Path            string        `yaml:"path"`
+	CompactInterval time.Duration `yaml:"compact_interval"`
+}
+
 // Config is the root configuration for the orchestrator.
 type Config struct {
 	ListenAddr       string            `yaml:"listen_addr"`
@@ -40,6 +53,8 @@ type Config struct {
 	StreamTTL        time.Duration     `yaml:"stream_ttl"`
 	MaxBodyBytes     int64             `yaml:"max_body_bytes"`
 	Replication      ReplicationConfig `yaml:"replication"`
+	Transaction      TransactionConfig `yaml:"transaction"`
+	WAL              WALConfig         `yaml:"wal"`
 }
 
 // defaults fills in zero-value fields with sensible defaults.
@@ -67,6 +82,15 @@ func (c *Config) defaults() {
 	}
 	if c.Replication.QueueCapacity == 0 {
 		c.Replication.QueueCapacity = 1024
+	}
+	if c.Transaction.CommitTimeout == 0 {
+		c.Transaction.CommitTimeout = 30 * time.Second
+	}
+	if c.WAL.Path == "" {
+		c.WAL.Path = "data/tx.wal"
+	}
+	if c.WAL.CompactInterval == 0 {
+		c.WAL.CompactInterval = 5 * time.Minute
 	}
 	if c.TableAssignments == nil {
 		c.TableAssignments = make(map[string]int)

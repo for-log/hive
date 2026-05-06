@@ -39,6 +39,7 @@ masters:
 	assert.Equal(t, 3, cfg.Replication.RetryMax)
 	assert.Equal(t, time.Second, cfg.Replication.RetryBackoff)
 	assert.Equal(t, 1024, cfg.Replication.QueueCapacity)
+	assert.Equal(t, 30*time.Second, cfg.Transaction.CommitTimeout)
 }
 
 func TestLoad_ExplicitValues(t *testing.T) {
@@ -60,6 +61,9 @@ replication:
   retry_max: 5
   retry_backoff: "2s"
   queue_capacity: 512
+transaction:
+  cross_master_enabled: true
+  commit_timeout: "45s"
 `)
 	cfg, err := config.Load(path)
 	require.NoError(t, err)
@@ -73,6 +77,8 @@ replication:
 	assert.Equal(t, 1, cfg.TableAssignments["orders"])
 	assert.Equal(t, 8, cfg.Replication.Workers)
 	assert.Equal(t, 512, cfg.Replication.QueueCapacity)
+	assert.True(t, cfg.Transaction.CrossMasterEnabled)
+	assert.Equal(t, 45*time.Second, cfg.Transaction.CommitTimeout)
 }
 
 func TestLoad_ValidationErrors(t *testing.T) {

@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/hive_v2/orchestrator/internal/router"
 	"github.com/hive_v2/orchestrator/internal/stream"
+	"github.com/hive_v2/orchestrator/internal/txlog"
 )
 
 // MasterClientPool provides a Hrana client for a given master index.
@@ -42,6 +44,9 @@ type DumpProvider interface {
 // WriteReplicator fans out a write statement to all non-origin masters.
 type WriteReplicator interface {
 	Enqueue(sql string, originMaster int)
+	// EnqueueTxn applies sqls as one logical transaction on each non-origin master
+	// (single Hrana pipeline: execute each statement, then close).
+	EnqueueTxn(sqls []string, originMaster int)
 }
 
 // Logger is a minimal logging interface so the server stays decoupled from
@@ -53,14 +58,16 @@ type Logger interface {
 
 // ServerConfig groups all dependencies for the HTTP server.
 type ServerConfig struct {
-	Pool         MasterClientPool
-	Router       *router.Router
-	StreamMgr    *stream.Manager
-	DumpProvider DumpProvider
-	Replicator   WriteReplicator // may be nil (replication disabled)
-	MaxBodyBytes int64
-	Logger       Logger
-	Version      string
+	Pool          MasterClientPool
+	Router        *router.Router
+	StreamMgr     *stream.Manager
+	DumpProvider  DumpProvider
+	Replicator    WriteReplicator // may be nil (replication disabled)
+	TxLog         *txlog.WAL      // optional transaction WAL
+	MaxBodyBytes  int64
+	Logger        Logger
+	Version       string
+	CommitTimeout time.Duration
 }
 
 // Server is the HRANA-compatible HTTP handler.
@@ -71,13 +78,19 @@ type Server struct {
 }
 
 func NewServer(cfg ServerConfig) *Server {
+	commitTimeout := cfg.CommitTimeout
+	if commitTimeout == 0 {
+		commitTimeout = 30 * time.Second
+	}
 	return &Server{
 		cfg: cfg,
 		proc: NewProcessor(ProcessorConfig{
-			Pool:       cfg.Pool,
-			Router:     cfg.Router,
-			Replicator: cfg.Replicator,
-			Logger:     cfg.Logger,
+			Pool:          cfg.Pool,
+			Router:        cfg.Router,
+			Replicator:    cfg.Replicator,
+			TxLog:         cfg.TxLog,
+			Logger:        cfg.Logger,
+			CommitTimeout: commitTimeout,
 		}),
 	}
 }
@@ -175,7 +188,7 @@ func (s *Server) handleV1Execute(w http.ResponseWriter, r *http.Request) {
 	if req.Stmt.SQL != nil {
 		sql = *req.Stmt.SQL
 	}
-	master, err := s.cfg.Router.RouteQuery(sql, nil)
+	master, err := s.cfg.Router.RouteQuery(sql, nil, false)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -227,7 +240,7 @@ func (s *Server) handleV1Batch(w http.ResponseWriter, r *http.Request) {
 	if len(req.Batch.Steps) > 0 && req.Batch.Steps[0].Stmt.SQL != nil {
 		sql = *req.Batch.Steps[0].Stmt.SQL
 	}
-	master, err := s.cfg.Router.RouteQuery(sql, nil)
+	master, err := s.cfg.Router.RouteQuery(sql, nil, false)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -299,7 +312,7 @@ func (s *Server) handleCursor(w http.ResponseWriter, r *http.Request) {
 	if len(req.Batch.Steps) > 0 && req.Batch.Steps[0].Stmt.SQL != nil {
 		sql = *req.Batch.Steps[0].Stmt.SQL
 	}
-	master, err := s.cfg.Router.RouteQuery(sql, strm.PinnedMaster)
+	master, err := s.cfg.Router.RouteQuery(sql, strm.PinnedMaster, strm.LazyCrossTxActive())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

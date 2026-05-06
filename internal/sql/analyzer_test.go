@@ -190,10 +190,10 @@ func TestAnalyze(t *testing.T) {
 
 		// DROP INDEX
 		{
-			name:    "drop index",
-			sql:     "DROP INDEX idx_users_name",
+			name:     "drop index",
+			sql:      "DROP INDEX idx_users_name",
 			wantType: gosql.QueryTypeDropIndex,
-			wantDDL: true,
+			wantDDL:  true,
 		},
 
 		// Transactions
@@ -253,10 +253,10 @@ func TestAnalyze(t *testing.T) {
 
 		// Comments stripped
 		{
-			name:       "line comment",
-			sql:        "-- get all users\nSELECT * FROM users",
-			wantType:   gosql.QueryTypeSelect,
-			wantRO:     true,
+			name:     "line comment",
+			sql:      "-- get all users\nSELECT * FROM users",
+			wantType: gosql.QueryTypeSelect,
+			wantRO:   true,
 		},
 		{
 			name:       "block comment",

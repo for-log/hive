@@ -17,6 +17,11 @@ import (
 	"github.com/hive_v2/orchestrator/internal/router"
 )
 
+const (
+	maxGRPCRequestBodyBytes = 4 << 20 // aligned with internal/config default MaxBodyBytes
+	grpcDataFrameHeaderLen  = 5
+)
+
 type Logger interface {
 	Info(msg string)
 	Error(msg string, err error)
@@ -30,7 +35,7 @@ type Config struct {
 	Router     *router.Router
 	Replicator WriteReplicator
 	Logger     Logger
-	Targets    []Target // one per master, indexed by master index
+	Targets    []Target
 }
 
 type Target struct {
@@ -59,8 +64,6 @@ func NewTarget(rawURL string) (Target, error) {
 	return Target{URL: rawURL, Proxy: proxy}, nil
 }
 
-// Handler intercepts gRPC proxy.Proxy/* requests, extracts SQL text for
-// routing, then forwards the raw gRPC body to the correct master.
 type Handler struct {
 	cfg Config
 }
@@ -77,20 +80,37 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// StreamExec, Describe, Disconnect — route to master[0] as default.
 	if strings.HasPrefix(path, "/proxy.Proxy/") {
+		if len(h.cfg.Targets) == 0 {
+			http.Error(w, "no targets configured", http.StatusServiceUnavailable)
+			return
+		}
 		h.logInfo("grpc proxy %s %s -> master[0] %s (default)", r.Method, path, h.cfg.Targets[0].URL)
 		h.cfg.Targets[0].Proxy.ServeHTTP(w, r)
 		return
 	}
+
+	http.NotFound(w, r)
 }
 
 func (h *Handler) handleExecute(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	r.Body.Close()
+	if len(h.cfg.Targets) == 0 {
+		http.Error(w, "no targets configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	limited := io.LimitReader(r.Body, maxGRPCRequestBodyBytes+1)
+	body, err := io.ReadAll(limited)
+	if closeErr := r.Body.Close(); closeErr != nil {
+		h.logError("grpc proxy: close request body", fmt.Errorf("close body: %w", closeErr))
+	}
 	if err != nil {
-		h.logError("grpc proxy: read body", err)
+		h.logError("grpc proxy: read body", fmt.Errorf("read body: %w", err))
 		http.Error(w, "read body", http.StatusBadGateway)
+		return
+	}
+	if int64(len(body)) > maxGRPCRequestBodyBytes {
+		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -106,7 +126,7 @@ func (h *Handler) handleExecute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(queries) > 0 {
-		master, routeErr := h.cfg.Router.RouteQuery(queries[0].SQL, nil)
+		master, routeErr := h.cfg.Router.RouteQuery(queries[0].SQL, nil, false)
 		if routeErr == nil {
 			masterIdx = master.Index
 		}
@@ -125,17 +145,14 @@ func (h *Handler) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// extractQueries decodes just enough of the gRPC body to extract SQL text
-// for routing decisions. Parameters are NOT extracted — the raw body is
-// forwarded to masters for both execution and replication.
 func (h *Handler) extractQueries(body []byte) []QueryStmt {
-	if len(body) < 5 {
+	if len(body) < grpcDataFrameHeaderLen {
 		return nil
 	}
-	payload := body[5:] // skip 5-byte gRPC frame header
+	payload := body[grpcDataFrameHeaderLen:]
 	req, err := DecodeProgramReq(payload)
 	if err != nil {
-		h.logError("grpc proxy: decode ProgramReq", err)
+		h.logError("grpc proxy: decode ProgramReq", fmt.Errorf("decode ProgramReq: %w", err))
 		return nil
 	}
 	return req.Queries

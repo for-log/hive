@@ -27,11 +27,11 @@ func TestRouter_RouteWrite_KnownTable(t *testing.T) {
 	r, err := router.New(twoMasterCfg(config.ReadPolicyWriteMaster), gosql.TokenAnalyzer{})
 	require.NoError(t, err)
 
-	m, err := r.RouteQuery("INSERT INTO users VALUES (1)", nil)
+	m, err := r.RouteQuery("INSERT INTO users VALUES (1)", nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, 0, m.Index)
 
-	m, err = r.RouteQuery("UPDATE orders SET x=1", nil)
+	m, err = r.RouteQuery("UPDATE orders SET x=1", nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, 1, m.Index)
 }
@@ -41,7 +41,7 @@ func TestRouter_RouteWrite_UnknownTable_DefaultsMaster0(t *testing.T) {
 	r, err := router.New(twoMasterCfg(config.ReadPolicyWriteMaster), gosql.TokenAnalyzer{})
 	require.NoError(t, err)
 
-	m, err := r.RouteQuery("INSERT INTO unknown_table VALUES (1)", nil)
+	m, err := r.RouteQuery("INSERT INTO unknown_table VALUES (1)", nil, false)
 	require.NoError(t, err)
 	// unknown_table auto-assigned; with empty map it goes to least-loaded (0 or 1).
 	assert.GreaterOrEqual(t, m.Index, 0)
@@ -53,11 +53,11 @@ func TestRouter_RouteRead_WriteMaster(t *testing.T) {
 	r, err := router.New(twoMasterCfg(config.ReadPolicyWriteMaster), gosql.TokenAnalyzer{})
 	require.NoError(t, err)
 
-	m, err := r.RouteQuery("SELECT * FROM users", nil)
+	m, err := r.RouteQuery("SELECT * FROM users", nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, 0, m.Index)
 
-	m, err = r.RouteQuery("SELECT * FROM orders", nil)
+	m, err = r.RouteQuery("SELECT * FROM orders", nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, 1, m.Index)
 }
@@ -69,7 +69,7 @@ func TestRouter_RouteRead_RoundRobin(t *testing.T) {
 
 	seen := map[int]bool{}
 	for i := 0; i < 20; i++ {
-		m, err := r.RouteQuery("SELECT 1", nil)
+		m, err := r.RouteQuery("SELECT 1", nil, false)
 		require.NoError(t, err)
 		seen[m.Index] = true
 	}
@@ -83,7 +83,7 @@ func TestRouter_RouteRead_Random(t *testing.T) {
 
 	seen := map[int]bool{}
 	for i := 0; i < 100; i++ {
-		m, err := r.RouteQuery("SELECT 1", nil)
+		m, err := r.RouteQuery("SELECT 1", nil, false)
 		require.NoError(t, err)
 		seen[m.Index] = true
 	}
@@ -96,7 +96,7 @@ func TestRouter_Transaction_PinnedMaster(t *testing.T) {
 	require.NoError(t, err)
 
 	// BEGIN pins to master 0 (users table).
-	pinned, err := r.RouteQuery("BEGIN", nil)
+	pinned, err := r.RouteQuery("BEGIN", nil, false)
 	require.NoError(t, err)
 
 	// All subsequent statements must stay on the pinned master.
@@ -106,7 +106,7 @@ func TestRouter_Transaction_PinnedMaster(t *testing.T) {
 		"SELECT * FROM orders",
 		"COMMIT",
 	} {
-		m, err := r.RouteQuery(sql, pinned)
+		m, err := r.RouteQuery(sql, pinned, false)
 		require.NoError(t, err)
 		assert.Equal(t, pinned.Index, m.Index, "sql=%q", sql)
 	}
@@ -117,10 +117,10 @@ func TestRouter_DDL_CreateTable(t *testing.T) {
 	r, err := router.New(twoMasterCfg(config.ReadPolicyWriteMaster), gosql.TokenAnalyzer{})
 	require.NoError(t, err)
 
-	m, err := r.RouteQuery("CREATE TABLE new_tbl (id INTEGER)", nil)
+	m, err := r.RouteQuery("CREATE TABLE new_tbl (id INTEGER)", nil, false)
 	require.NoError(t, err)
 	// Should be auto-assigned and consistent on repeat.
-	m2, err := r.RouteQuery("INSERT INTO new_tbl VALUES (1)", nil)
+	m2, err := r.RouteQuery("INSERT INTO new_tbl VALUES (1)", nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, m.Index, m2.Index)
 }
@@ -129,4 +129,21 @@ func TestRouter_NoMasters_Error(t *testing.T) {
 	t.Parallel()
 	_, err := router.New(&config.Config{}, gosql.TokenAnalyzer{})
 	require.Error(t, err)
+}
+
+func TestRouter_CrossMaster_RoutePerStatement(t *testing.T) {
+	t.Parallel()
+	cfg := twoMasterCfg(config.ReadPolicyWriteMaster)
+	cfg.Transaction.CrossMasterEnabled = true
+	r, err := router.New(cfg, gosql.TokenAnalyzer{})
+	require.NoError(t, err)
+
+	pinned := &router.Master{Index: 0, URL: "http://m0"}
+	m, err := r.RouteQuery("INSERT INTO orders VALUES (1)", pinned, true)
+	require.NoError(t, err)
+	assert.Equal(t, 1, m.Index, "should ignore pin when routePerStatement and cross-master enabled")
+
+	m, err = r.RouteQuery("INSERT INTO users VALUES (1)", pinned, true)
+	require.NoError(t, err)
+	assert.Equal(t, 0, m.Index)
 }

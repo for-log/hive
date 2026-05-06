@@ -149,6 +149,23 @@ func TestReplicator_MultipleTasksInOrder(t *testing.T) {
 	assert.Equal(t, sqls, pool.executors[1].SQLs())
 }
 
+func TestReplicator_EnqueueTxnOnePipeline(t *testing.T) {
+	pool := newRecordPool(2)
+	r, cancel := newReplicator(t, pool, 2, 1)
+	defer cancel()
+
+	batch := []string{"BEGIN", "INSERT INTO t VALUES (1)", "INSERT INTO t VALUES (2)", "COMMIT"}
+	r.EnqueueTxn(batch, 0)
+
+	waitForCalls(t, pool.executors[1], 1)
+
+	pool.executors[1].mu.Lock()
+	defer pool.executors[1].mu.Unlock()
+	got := pool.executors[1].calls
+	require.Len(t, got, len(batch), "one pipeline should contain every statement")
+	assert.Equal(t, batch, got)
+}
+
 func TestReplicator_DropsWhenQueueFull(t *testing.T) {
 	pool := newRecordPool(2)
 	ctx, cancel := context.WithCancel(context.Background())

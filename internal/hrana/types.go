@@ -102,6 +102,15 @@ type StmtResult struct {
 	QueryDurationMs  float64         `json:"query_duration_ms,omitempty"`
 }
 
+// EmptyStmtResultJSON encodes an execute result with empty cols/rows as JSON arrays, not null.
+// Some clients (e.g. go-libsql) reject null where Hrana expects a sequence.
+func EmptyStmtResultJSON() (json.RawMessage, error) {
+	return json.Marshal(StmtResult{
+		Cols: []Column{},
+		Rows: [][]Value{},
+	})
+}
+
 type Column struct {
 	Name     *string `json:"name"`
 	DeclType *string `json:"decltype"`

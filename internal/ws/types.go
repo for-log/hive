@@ -58,7 +58,7 @@ type ClientRequest struct {
 
 	// open_cursor
 	// StreamID reused
-	CursorID int32        `json:"cursor_id,omitempty"`
+	CursorID int32 `json:"cursor_id,omitempty"`
 	// Batch reused for open_cursor payload
 
 	// fetch_cursor
@@ -127,8 +127,8 @@ type CursorEntry struct {
 	Type string `json:"type"`
 
 	// step_begin
-	Step      *int32              `json:"step,omitempty"`
-	Cols      []hrana.Column      `json:"cols,omitempty"`
+	Step *int32         `json:"step,omitempty"`
+	Cols []hrana.Column `json:"cols,omitempty"`
 
 	// step_end
 	Affected *uint64 `json:"affected_row_count,omitempty"`

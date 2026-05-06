@@ -15,8 +15,7 @@ type Master struct {
 	URL   string
 }
 
-// TransactionCoordinator is the seam for future 2PC support.
-// The current implementation routes the whole transaction to a single master.
+// TransactionCoordinator is the seam for transaction boundary routing (BEGIN/COMMIT/ROLLBACK).
 type TransactionCoordinator interface {
 	// MasterForTx returns the master that should handle a transaction.
 	// pinned is non-nil when the stream is already mid-transaction.
@@ -26,12 +25,13 @@ type TransactionCoordinator interface {
 // Router decides which master handles a given query.
 // Construct with New; do not copy after first use.
 type Router struct {
-	masters    []Master
-	tableMap   *TableMap
-	readPolicy config.ReadPolicy
-	analyzer   gosql.Analyzer
-	rrCounter  atomic.Uint64 // round-robin state for reads
-	txCoord    TransactionCoordinator
+	masters            []Master
+	tableMap           *TableMap
+	readPolicy         config.ReadPolicy
+	analyzer           gosql.Analyzer
+	rrCounter          atomic.Uint64 // round-robin state for reads
+	txCoord            TransactionCoordinator
+	crossMasterEnabled bool
 }
 
 // New creates a Router from the provided config.
@@ -51,28 +51,37 @@ func New(cfg *config.Config, analyzer gosql.Analyzer) (*Router, error) {
 	}
 
 	r := &Router{
-		masters:    masters,
-		tableMap:   tm,
-		readPolicy: cfg.ReadPolicy,
-		analyzer:   analyzer,
+		masters:            masters,
+		tableMap:           tm,
+		readPolicy:         cfg.ReadPolicy,
+		analyzer:           analyzer,
+		crossMasterEnabled: cfg.Transaction.CrossMasterEnabled,
 	}
 	r.txCoord = &singleMasterTxCoordinator{router: r}
 	return r, nil
+}
+
+// CrossMasterEnabled reports whether per-statement routing is allowed mid-transaction.
+func (r *Router) CrossMasterEnabled() bool {
+	return r.crossMasterEnabled
 }
 
 // RouteQuery returns the master that should handle the given SQL statement.
 // For writes, it uses the table map. For reads, it applies the read policy.
 // For transactions, it delegates to the TransactionCoordinator.
 //
+// routePerStatement, when true with CrossMasterEnabled, ignores pinning so each
+// statement is routed by its tables (lazy cross-master transactions).
+//
 // pinned is the master the current stream is already bound to (mid-transaction).
-func (r *Router) RouteQuery(sql string, pinned *Master) (*Master, error) {
+func (r *Router) RouteQuery(sql string, pinned *Master, routePerStatement bool) (*Master, error) {
 	info := r.analyzer.Analyze(sql)
 
 	if info.IsTxBegin || info.IsTxEnd {
 		return r.txCoord.MasterForTx(info.Tables, pinned)
 	}
 
-	if pinned != nil {
+	if pinned != nil && !(routePerStatement && r.crossMasterEnabled) {
 		return pinned, nil
 	}
 
@@ -136,8 +145,6 @@ func (r *Router) IsReadOnly(sql string) bool {
 
 // singleMasterTxCoordinator routes the entire transaction to one master.
 // If the stream is already pinned (mid-tx), that master is reused.
-// If the transaction touches tables on different masters, an error is returned —
-// the caller should surface this to the client until 2PC is implemented.
 type singleMasterTxCoordinator struct {
 	router *Router
 }

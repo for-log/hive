@@ -30,6 +30,8 @@
 - **Прозрачное проксирование** — клиенты подключаются как к обычному libSQL-серверу
 - **Гибкие политики чтения** — `write_master`, `round_robin`, `random`
 - **Двойной путь репликации** — SQL replay (Hrana) и raw gRPC forwarding
+- **Turso Sync Protocol** — поддержка Python/Rust libsql embedded replica через HTTP sync
+- **Кросс-мастерные транзакции (опционально)** — при `transaction.cross_master_enabled: true` поддерживается ленивый `BEGIN` и фан-аут `COMMIT`/`ROLLBACK` на все затронутые мастера
 - **Единый порт** — HTTP/1.1, WebSocket и HTTP/2 (gRPC) через h2c
 - **Минимальные зависимости** — 4 прямых Go-зависимости, без тяжёлых фреймворков
 
@@ -45,6 +47,7 @@
 | Hrana v3 WebSocket | `ws://…` (subprotocol `hrana3`) | Полный стриминг, курсоры |
 | gRPC proxy.Proxy | `/proxy.Proxy/Execute` | Embedded replica записи |
 | WAL replication | `/wal_log.ReplicationLog/…` | Прокси к master[0] |
+| Turso Sync | `GET /info`, `GET /export/{gen}`, `GET|POST /sync/…` | Python libsql embedded replica sync |
 | Health check | `GET /health` | 200 OK |
 | Version | `GET /version` | Строка версии |
 | Dump | `GET /dump` | Агрегированный SQL-дамп |
@@ -92,6 +95,10 @@ replication:
   retry_max: 3
   retry_backoff: "1s"
   queue_capacity: 1024
+
+transaction:
+  cross_master_enabled: false   # true — ленивый BEGIN и COMMIT на несколько мастеров
+  commit_timeout: "30s"        # таймаут фазы фан-аут COMMIT
 ```
 
 Подробнее: [docs/requirements.md](docs/requirements.md)
@@ -140,6 +147,7 @@ hive_v2/
 │   ├── router/             # Маршрутизация + TableMap
 │   ├── sql/                # SQL-анализатор
 │   ├── stream/             # Baton-менеджер
+│   ├── sync/               # Turso Sync Protocol (HTTP)
 │   └── ws/                 # Hrana v3 WebSocket
 ├── docs/                   # Документация
 │   ├── architecture.md     # Архитектура
@@ -164,9 +172,9 @@ go run ./cmd/replica_test/   # smoke-тест (требует запущенно
 
 ## Ограничения
 
-- **Кросс-мастерные транзакции** — транзакция, затрагивающая таблицы разных мастеров, завершится ошибкой. 2PC не реализован.
+- **Кросс-мастерные транзакции** — по умолчанию (`transaction.cross_master_enabled: false`) транзакция, затрагивающая таблицы разных мастеров, завершится ошибкой (стрим закреплён на одном мастере). При включении `cross_master_enabled` оркестратор выполняет **буферизованную симуляцию 2PC** (ленивый `BEGIN`): `COMMIT`/`ROLLBACK` рассылаются на все мастера, куда дошла первая запись транзакции. Это **не** полноценный распределённый 2PC: нет восстановления после сбоя оркестратора (возможна частичная фиксация), нет распределённого снимка изоляции (другие клиенты могут видеть промежуточное состояние между отдельными `COMMIT` на мастерах), чтение своих записей гарантируется **в пределах каждого мастера**, но не между мастерами внутри одной транзакции до репликации.
 - **Репликация eventual consistency** — между записью и появлением данных на остальных мастерах есть задержка.
-- **WAL-прокси только к master[0]** — embedded replica синхронизируются через master[0].
+- **WAL-прокси только к master[0]** — go-libsql embedded replica синхронизируются через master[0]. Python libsql использует Turso Sync Protocol (GET /export) для начальной загрузки.
 - **Без аутентификации на уровне оркестратора** — токены передаются напрямую мастерам.
 
 ## Документация

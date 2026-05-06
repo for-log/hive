@@ -18,3 +18,7 @@ replication:
   retry_max: 3
   retry_backoff: "1s"
   queue_capacity: 1024
+
+transaction:
+  cross_master_enabled: true
+  commit_timeout: 30s

@@ -12,8 +12,8 @@ import (
 	"golang.org/x/net/http2"
 )
 
-// Forwarder sends raw gRPC request bodies to masters via HTTP/2.
-// It implements replication.GRPCForwarder.
+const maxForwardResponseDrainBytes = 4 << 20
+
 type Forwarder struct {
 	clients []forwarderTarget
 }
@@ -40,16 +40,14 @@ func NewForwarder(masterURLs []string) *Forwarder {
 	return &Forwarder{clients: targets}
 }
 
-// ForwardGRPC sends body as a gRPC POST to the specified master.
-// Returns an error if the HTTP request fails or the gRPC status indicates failure.
-func (f *Forwarder) ForwardGRPC(ctx context.Context, masterIdx int, path string, body []byte) error {
+func (f *Forwarder) ForwardGRPC(ctx context.Context, masterIdx int, path string, body []byte) (err error) {
 	if masterIdx < 0 || masterIdx >= len(f.clients) {
 		return fmt.Errorf("master index %d out of range", masterIdx)
 	}
 	t := f.clients[masterIdx]
 
-	url := t.url + path
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	reqURL := t.url + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -60,8 +58,20 @@ func (f *Forwarder) ForwardGRPC(ctx context.Context, masterIdx int, path string,
 	if err != nil {
 		return fmt.Errorf("forward gRPC to %s: %w", t.url, err)
 	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	defer func() {
+		cerr := resp.Body.Close()
+		if cerr != nil && err == nil {
+			err = fmt.Errorf("close response body from %s: %w", t.url, cerr)
+		}
+	}()
+
+	n, copyErr := io.Copy(io.Discard, io.LimitReader(resp.Body, maxForwardResponseDrainBytes+1))
+	if copyErr != nil {
+		return fmt.Errorf("drain response from %s: %w", t.url, copyErr)
+	}
+	if n > maxForwardResponseDrainBytes {
+		return fmt.Errorf("response body from %s exceeds %d bytes", t.url, maxForwardResponseDrainBytes)
+	}
 
 	if grpcStatus := resp.Trailer.Get("grpc-status"); grpcStatus != "" && grpcStatus != "0" {
 		grpcMsg := resp.Trailer.Get("grpc-message")

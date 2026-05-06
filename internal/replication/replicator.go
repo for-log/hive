@@ -13,8 +13,9 @@ import (
 
 type Task struct {
 	SQL          string
-	GRPCBody     []byte // raw gRPC frame to forward (mutually exclusive with SQL)
-	GRPCPath     string // e.g. "/proxy.Proxy/Execute"
+	SQLBatch     []string // multiple executes + close in one pipeline (mutually exclusive with SQL)
+	GRPCBody     []byte   // raw gRPC frame to forward (mutually exclusive with SQL)
+	GRPCPath     string   // e.g. "/proxy.Proxy/Execute"
 	OriginMaster int
 }
 
@@ -92,6 +93,17 @@ func (r *Replicator) Enqueue(sql string, originMaster int) {
 	r.enqueue(Task{SQL: sql, OriginMaster: originMaster}, truncate(sql, 60))
 }
 
+// EnqueueTxn replicates a series of SQL statements as one upstream transaction per target master.
+func (r *Replicator) EnqueueTxn(sqls []string, originMaster int) {
+	if len(sqls) == 0 {
+		return
+	}
+	cp := make([]string, len(sqls))
+	copy(cp, sqls)
+	label := fmt.Sprintf("txn[%d stmts] %s", len(sqls), truncate(cp[0], 40))
+	r.enqueue(Task{SQLBatch: cp, OriginMaster: originMaster}, label)
+}
+
 // EnqueueGRPC adds a raw gRPC body forwarding task.
 // The same bytes that the origin master received are sent to all other masters.
 func (r *Replicator) EnqueueGRPC(body []byte, path string, originMaster int) {
@@ -156,6 +168,8 @@ func (r *Replicator) replicate(ctx context.Context, task Task) {
 		}
 		if len(task.GRPCBody) > 0 {
 			r.replicateGRPC(ctx, task.GRPCBody, task.GRPCPath, i)
+		} else if len(task.SQLBatch) > 0 {
+			r.replicateSQLBatch(ctx, task.SQLBatch, i)
 		} else {
 			r.replicateSQL(ctx, task.SQL, i)
 		}
@@ -225,6 +239,47 @@ func (r *Replicator) replicateSQL(ctx context.Context, sql string, masterIdx int
 			if r.logger != nil {
 				r.logger.Error(
 					fmt.Sprintf("replication: %s SQL failed after %d attempts sql=%s", name, r.retryMax+1, truncate(sql, 60)),
+					err,
+				)
+			}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+			backoff *= 2
+		}
+	}
+}
+
+func (r *Replicator) replicateSQLBatch(ctx context.Context, sqls []string, masterIdx int) {
+	name := r.targetName(masterIdx)
+	executor := r.pool.ClientFor(masterIdx)
+	reqs := make([]hrana.StreamRequest, 0, len(sqls)+1)
+	for i := range sqls {
+		sqlCopy := sqls[i]
+		reqs = append(reqs, hrana.StreamRequest{Type: "execute", Stmt: &hrana.Stmt{SQL: &sqlCopy, WantRows: false}})
+	}
+	reqs = append(reqs, hrana.CloseRequest())
+	req := &hrana.PipelineRequest{Requests: reqs}
+
+	backoff := r.retryBackoff
+	for attempt := range r.retryMax + 1 {
+		resp, err := executor.Pipeline(ctx, req)
+		if err == nil {
+			err = checkPipelineErrors(resp)
+		}
+		if err == nil {
+			if r.logger != nil {
+				r.logger.Info(fmt.Sprintf("replicated SQL batch -> %s n=%d", name, len(sqls)))
+			}
+			return
+		}
+		if attempt == r.retryMax {
+			if r.logger != nil {
+				r.logger.Error(
+					fmt.Sprintf("replication: %s SQL batch failed after %d attempts n=%d", name, r.retryMax+1, len(sqls)),
 					err,
 				)
 			}

@@ -8,10 +8,10 @@ import (
 // TableMap maintains the assignment of table names to master indices.
 // All methods are safe for concurrent use.
 type TableMap struct {
-	mu           sync.RWMutex
-	assignments  map[string]int // table name -> master index
-	masterCount  int
-	nextMaster   int // round-robin counter for auto-assignment
+	mu          sync.RWMutex
+	assignments map[string]int // table name -> master index
+	masterCount int
+	nextMaster  int // round-robin counter for auto-assignment
 }
 
 func NewTableMap(masterCount int, initial map[string]int) (*TableMap, error) {
